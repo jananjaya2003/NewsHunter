@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}News Hunter{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}">
+</head>
+<body>
+  <div class="utility-bar">
+    <div class="header-shell">
+      <span>Medical media intelligence</span>
+      <span>Sri Lanka · English editions</span>
+    </div>
+  </div>
+  <header class="site-header">
+    <div class="header-shell main-header">
+      <a class="brand" href="/monitor" aria-label="News Hunter home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 40 40" role="img"><path d="M8 5h20a4 4 0 0 1 4 4v22a4 4 0 0 1-4 4H8V5Z"/><path d="M8 10H4v21a4 4 0 0 0 4 4"/><path d="M13 12h12M13 18h12M13 24h7"/></svg>
+        </span>
+        <span>News Hunter</span>
+      </a>
+      <nav class="site-nav" aria-label="Main navigation">
+        <a href="/monitor">Newspaper check</a>
+        <a href="/admin">PDF workspace</a>
+      </nav>
+    </div>
+  </header>
+  <main class="container">{% block content %}{% endblock %}</main>
+  <footer>
+    <div class="footer-shell">
+      <strong>News Hunter</strong>
+      <span>Medical-service reporting from trusted newspaper editions.</span>
+      <span>For private use. Verify important facts with the original publication.</span>
+    </div>
+  </footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

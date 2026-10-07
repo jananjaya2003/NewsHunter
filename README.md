@@ -1,5 +1,9 @@
 # News Hunter
 
+For GitHub setup and Vercel preview deployment, see
+[Deployment guide](docs/DEPLOYMENT.md). Production editorial hosting needs
+durable storage and a processing worker; preview storage is temporary.
+
 A private-first MVP that extracts only medical and healthcare-service reporting
 from a lawfully obtained newspaper PDF and creates a concise, page-cited brief.
 The agent uses Gemini as its default AI brain with schema-constrained output,

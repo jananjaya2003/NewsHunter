@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}{{ issue.publication }} {{ issue.edition_date }} · Editor{% endblock %}
+{% block content %}
+<a class="back" href="/admin">← All editions</a>
+<section class="issue-heading">
+  <div>
+    <p class="eyebrow">{{ issue.publication }}</p>
+    <h1>{{ issue.edition_date }}</h1>
+  </div>
+  <span class="status {{ issue.status }}">{{ issue.status }}</span>
+</section>
+
+{% if message %}<div class="notice">{{ message }}</div>{% endif %}
+
+{% if issue.status in ['queued', 'processing'] %}
+<section class="panel centered">
+  <div class="spinner"></div>
+  <h2>The medical-news agent is processing this edition</h2>
+  <p>It extracts text page by page, rejects non-medical stories, validates medical evidence and page citations, then merges duplicates.</p>
+  <p class="muted">Refresh this page after a minute. Keep the server running.</p>
+</section>
+{% elif issue.status == 'failed' %}
+<div class="notice danger"><strong>Processing failed:</strong> {{ issue.error_message }}</div>
+{% if source_exists %}
+<form method="post" action="/admin/issues/{{ issue.id }}/retry">
+  <button class="primary" type="submit">Retry processing</button>
+</form>
+{% else %}
+<p>The temporary source was deleted. Return to the dashboard and upload the PDF again.</p>
+{% endif %}
+{% else %}
+<section class="panel">
+  <h2>Medical coverage overview</h2>
+  <form method="post" action="/admin/issues/{{ issue.id }}/overview">
+    <label>Review and edit the overview
+      <textarea name="overview" rows="5" maxlength="3000" required>{{ issue.overview }}</textarea>
+    </label>
+    <button type="submit">Save overview</button>
+  </form>
+  {% if issue.editor_notes %}
+  <h3>Agent warnings</h3>
+  <ul>{% for note in issue.editor_notes %}<li>{{ note }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if issue.source_url %}<p><a href="{{ issue.source_url }}" rel="noopener noreferrer">Open official source ↗</a></p>{% endif %}
+</section>
+
+<div class="toolbar">
+  <form method="post" action="/admin/issues/{{ issue.id }}/approve-all">
+    <button type="submit">Approve all visible stories</button>
+  </form>
+  <form method="post" action="/admin/issues/{{ issue.id }}/publish">
+    <button class="primary" type="submit">Publish brief</button>
+  </form>
+  {% if issue.status == 'published' %}<a class="button-link" href="/brief/{{ issue.id }}">View public brief →</a>{% endif %}
+</div>
+
+<section class="stories">
+{% if not stories %}
+<div class="notice">No qualifying medical or healthcare-service stories were found. This edition cannot be published as a brief.</div>
+{% endif %}
+{% for story in stories %}
+  <form class="story-card{% if story.sensitive %} sensitive{% endif %}" method="post" action="/admin/issues/{{ issue.id }}/stories/{{ story.id }}">
+    <div class="story-meta">
+      <span>Pages {{ story.page_numbers | join(', ') }}</span>
+      <span>Confidence {{ '%.0f' | format(story.confidence * 100) }}%</span>
+      {% if story.sensitive %}<span class="warning">Extra review</span>{% endif %}
+    </div>
+    <label>Headline
+      <input name="title" value="{{ story.title }}" maxlength="300" required>
+    </label>
+    <div class="two-col">
+      <label>Category
+        <select name="category">
+          {% for category in categories %}<option{% if category == story.category %} selected{% endif %}>{{ category }}</option>{% endfor %}
+        </select>
+      </label>
+      <div><span class="field-label">Byline</span><p>{{ story.byline or 'Not detected' }}</p></div>
+    </div>
+    <label>Summary
+      <textarea name="summary" rows="5" maxlength="2000" required>{{ story.summary }}</textarea>
+    </label>
+    {% if story.key_people %}<p class="details"><strong>People:</strong> {{ story.key_people | join(', ') }}</p>{% endif %}
+    {% if story.key_numbers %}<p class="details"><strong>Numbers:</strong> {{ story.key_numbers | join(', ') }}</p>{% endif %}
+    <div class="card-actions">
+      <label class="check"><input type="checkbox" name="approved"{% if story.approved %} checked{% endif %}> I checked this against the cited page</label>
+      <button type="submit">Save story</button>
+    </div>
+  </form>
+{% endfor %}
+</section>
+{% endif %}
+{% endblock %}
