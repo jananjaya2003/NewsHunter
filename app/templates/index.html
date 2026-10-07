@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}PDF workspace · News Hunter{% endblock %}
+{% block content %}
+<section class="hero">
+  <p class="eyebrow">NEWS HUNTER WORKSPACE</p>
+  <h1>Process a newspaper PDF.</h1>
+  <p>The agent ignores general news and summarizes only qualifying medical, public-health, and healthcare-service reporting. Upload only a PDF you are authorized to process.</p>
+</section>
+
+{% if auth_warning %}
+<div class="notice danger"><strong>Security warning:</strong> ADMIN_PASSWORD is empty. Keep this app on 127.0.0.1 until authentication is configured.</div>
+{% endif %}
+
+<div class="notice{% if not ai_configured %} danger{% endif %}">
+  <strong>AI brain:</strong> {{ ai_provider | upper }} · {{ ai_model }}.
+  {% if ai_configured %}API key configured.{% else %}Add the provider API key to <code>.env</code> before uploading a PDF.{% endif %}
+</div>
+
+<section class="panel quick-check-panel">
+  <div>
+    <h2>Check the online newspapers</h2>
+    <p class="muted">Choose Daily News or Sunday Observer and display the latest medical article images without summaries.</p>
+  </div>
+  <a class="button-link" href="/monitor">Open newspaper checker</a>
+</section>
+
+<section class="panel">
+  <h2>Process a new edition</h2>
+  <p class="muted">Included: public health, hospitals, patient services, healthcare workforce, medicines, health policy, and medical research. Borderline medical items are retained for human review.</p>
+  <form method="post" action="/admin/issues" enctype="multipart/form-data" class="upload-grid">
+    <label>Publication
+      <input name="publication" value="Daily News" maxlength="200" required>
+    </label>
+    <label>Edition date
+      <input type="date" name="edition_date" value="{{ today }}" required>
+    </label>
+    <label class="wide">Official source URL (optional)
+      <input type="url" name="source_url" placeholder="https://epaper.dailynews.lk/">
+    </label>
+    <label class="wide">Newspaper PDF (maximum {{ max_upload_mb }} MB)
+      <input type="file" name="pdf" accept="application/pdf,.pdf" required>
+    </label>
+    <button class="primary" type="submit">Upload and create draft</button>
+  </form>
+</section>
+
+<section class="panel">
+  <h2>Editions</h2>
+  {% if issues %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Date</th><th>Publication</th><th>Status</th><th>Approval</th><th></th></tr></thead>
+      <tbody>
+      {% for issue in issues %}
+        <tr>
+          <td>{{ issue.edition_date }}</td>
+          <td>{{ issue.publication }}</td>
+          <td><span class="status {{ issue.status }}">{{ issue.status }}</span></td>
+          <td>{{ issue.approved_count }}/{{ issue.story_count }}</td>
+          <td><a href="/admin/issues/{{ issue.id }}">Open →</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No editions have been processed yet.</p>
+  {% endif %}
+</section>
+{% endblock %}
