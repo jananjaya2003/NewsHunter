@@ -45,3 +45,20 @@ def test_vercel_default_paths_are_in_temporary_storage():
         )], env=env, capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_vercel_without_password_explains_setup_and_stays_locked():
+    env = {**os.environ, "VERCEL": "1", "ADMIN_PASSWORD": ""}
+    for name in ("DATABASE_PATH", "UPLOAD_DIR", "REPORT_DIR"):
+        env[name] = str(Path(tempfile.mkdtemp()) / name.lower())
+    result = subprocess.run(
+        [sys.executable, "-c", (
+            "from app.main import app; from fastapi.testclient import TestClient; "
+            "c=TestClient(app); "
+            "r=c.get('/health'); assert r.status_code == 503, r.status_code; "
+            "assert 'ADMIN_PASSWORD' in r.text, r.text; "
+            "assert c.get('/monitor').status_code == 503; "
+            "assert c.get('/monitor', auth=('admin', '')).status_code == 503"
+        )], env=env, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr

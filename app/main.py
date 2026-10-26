@@ -39,7 +39,19 @@ from app.monitor.epaper_monitor import (
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 LOGGER = logging.getLogger(__name__)
 
-settings.prepare_directories()
+try:
+    settings.prepare_directories()
+    SETUP_ERROR = ""
+except RuntimeError as exc:
+    # Explain the missing setting on every page instead of an opaque Vercel 500;
+    # protect_admin keeps the whole site locked until it is fixed.
+    SETUP_ERROR = (
+        f"News Hunter is not set up yet: {exc} In Vercel open Project -> Settings -> "
+        "Environment Variables, add ADMIN_PASSWORD, then redeploy."
+    )
+    LOGGER.error(SETUP_ERROR)
+    settings.database_path.parent.mkdir(parents=True, exist_ok=True)
+    settings.upload_dir.mkdir(parents=True, exist_ok=True)
 MONITOR_REPORT_ROOT = settings.report_dir
 MONITOR_REPORT_ROOT.mkdir(parents=True, exist_ok=True)
 database = Database(settings.database_path)
@@ -252,6 +264,8 @@ def _same_origin_request(request: Request) -> bool:
 
 @app.middleware("http")
 async def protect_admin(request: Request, call_next):
+    if SETUP_ERROR:
+        return Response(SETUP_ERROR, status_code=503, media_type="text/plain")
     public_path = (
         request.url.path.startswith("/brief/")
         or request.url.path.startswith("/static/")
