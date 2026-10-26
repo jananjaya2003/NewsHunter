@@ -403,6 +403,17 @@ def api_job(job_id: str):
     return data
 
 
+def _publisher_failure(exc: Exception) -> str:
+    """Short, non-sensitive reason a publisher request failed, for the screen."""
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        return f"publisher answered HTTP {exc.response.status_code}"
+    if isinstance(exc, requests.Timeout):
+        return "publisher did not answer in time"
+    if isinstance(exc, requests.ConnectionError):
+        return "connection to the publisher was refused or dropped"
+    return type(exc).__name__
+
+
 @app.get("/api/availability")
 def api_availability(publication: str, month: str):
     selected = _publication(publication)
@@ -417,7 +428,10 @@ def api_availability(publication: str, month: str):
         dates = availability.month(selected, year, month_number)
     except (requests.RequestException, RuntimeError, ValueError) as exc:
         LOGGER.warning("Availability lookup failed: %s", exc)
-        raise HTTPException(502, "The publisher's edition calendar could not be reached.") from exc
+        raise HTTPException(
+            502,
+            f"The publisher's edition calendar could not be reached ({_publisher_failure(exc)}).",
+        ) from exc
     checked = {}
     for value in dates:
         manifest = load_manifest(MONITOR_REPORT_ROOT, selected, value)

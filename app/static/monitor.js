@@ -99,7 +99,10 @@ function setupFinder() {
     const key = `${year}-${String(month + 1).padStart(2, "0")}`;
     if (monthCache.has(key)) return monthCache.get(key);
     const response = await fetch(`/api/availability?publication=${publication}&month=${key}`, { credentials: "same-origin" });
-    if (!response.ok) throw new Error(`Calendar unavailable (HTTP ${response.status})`);
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      throw new Error(detail.detail ? `Calendar unavailable: ${detail.detail}` : `Calendar unavailable (HTTP ${response.status})`);
+    }
     const data = await response.json();
     monthCache.set(key, data);
     return data;

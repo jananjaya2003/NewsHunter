@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
 
+import requests
 from fastapi.testclient import TestClient
 
 import app.main as main_module
@@ -287,6 +288,18 @@ def test_availability_lists_publisher_dates_and_saved_results(monkeypatch, tmp_p
     assert data["checked"] == {"2026-10-15": {"complete": True, "count": 1, "tenders": 0}}
     bad = client.get("/api/availability", params={"publication": "daily-news", "month": "x"})
     assert bad.status_code == 400
+
+
+def test_availability_failure_explains_publisher_problem(monkeypatch):
+    def blocked(publication, year, month):
+        raise requests.ConnectionError("connection reset by peer")
+
+    monkeypatch.setattr(main_module.availability, "month", blocked)
+    response = client.get(
+        "/api/availability", params={"publication": "daily-news", "month": "2026-10"}
+    )
+    assert response.status_code == 502
+    assert "refused or dropped" in response.json()["detail"]
 
 
 def test_image_proxy_only_serves_items_from_a_saved_result(monkeypatch, tmp_path):
