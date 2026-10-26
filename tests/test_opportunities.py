@@ -1,4 +1,4 @@
-from app.opportunities import CATEGORIES, classify, dates_mentioned, institutions
+from app.medical.opportunities import CATEGORIES, classify, dates_mentioned, institutions
 
 HOSPITAL_NOTICE = """PROCUREMENT NOTICE
 NATIONAL NEPHROLOGY SPECIALIZED HOSPITAL - POLONNARUWA

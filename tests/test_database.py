@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.database import Database
+from app.core.database import Database
 
 
 def test_publish_requires_all_stories_approved(tmp_path: Path):

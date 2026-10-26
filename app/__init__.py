@@ -1,1 +1,1 @@
-"""Daily Brief Agent application package."""
+"""News Hunter: medical tender and healthcare news monitor."""

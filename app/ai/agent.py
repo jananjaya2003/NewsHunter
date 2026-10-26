@@ -7,12 +7,12 @@ from collections.abc import Iterable
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from app.ai_engines import AIEngine, create_ai_engine
-from app.config import Settings
-from app.database import Database
-from app.pdf_extract import TextChunk, chunk_pages, extract_pages
-from app.rules import MEDICAL_SCOPE_RULES, medical_evidence_supported
-from app.schemas import ChunkResult, ExtractedStory, IssueBrief
+from app.ai.engines import AIEngine, create_ai_engine
+from app.core.config import Settings
+from app.core.database import Database
+from app.core.schemas import ChunkResult, ExtractedStory, IssueBrief
+from app.extraction.pdf_extract import TextChunk, chunk_pages, extract_pages
+from app.medical.rules import MEDICAL_SCOPE_RULES, medical_evidence_supported
 
 LOGGER = logging.getLogger(__name__)
 

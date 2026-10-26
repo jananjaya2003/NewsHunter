@@ -16,7 +16,11 @@ data/
 reports/
 
 # Editor
-.vscode/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
 
 # Vercel CLI project link
 .vercel/

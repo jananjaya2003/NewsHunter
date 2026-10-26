@@ -1,27 +1,26 @@
 param(
-    [string]$TaskName = 'Medical News Monitor Web App'
+    [string]$TaskName = 'News Hunter Daily Tender Check',
+    [string]$At = '7:30 AM'
 )
 
 $ErrorActionPreference = 'Stop'
-$projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$runnerPath = Join-Path $projectRoot 'run_web_app.ps1'
+$projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$runnerPath = Join-Path $PSScriptRoot 'run_epaper_monitor.ps1'
 $powerShellPath = (Get-Command powershell.exe).Source
-$taskArguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$runnerPath`""
+$taskArguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$runnerPath`" -OpenReport"
 
 $action = New-ScheduledTaskAction `
     -Execute $powerShellPath `
     -Argument $taskArguments `
     -WorkingDirectory $projectRoot
-$trigger = New-ScheduledTaskTrigger -AtLogOn `
-    -User ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)
+$trigger = New-ScheduledTaskTrigger -Daily -At $At
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -RunOnlyIfNetworkAvailable `
+    -WakeToRun `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
-    -ExecutionTimeLimit (New-TimeSpan -Days 3650) `
-    -RestartCount 3 `
-    -RestartInterval (New-TimeSpan -Minutes 1)
+    -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 $principal = New-ScheduledTaskPrincipal `
     -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
     -LogonType Interactive `
@@ -33,7 +32,7 @@ Register-ScheduledTask `
     -Trigger $trigger `
     -Settings $settings `
     -Principal $principal `
-    -Description 'Runs the local Medical News Monitor website after Windows sign-in.' `
+    -Description "Checks the latest Daily News and Sunday Observer editions for medical tenders at $At (or as soon as the PC is on) and opens the results." `
     -Force | Out-Null
 
 Get-ScheduledTask -TaskName $TaskName | Select-Object TaskName, State

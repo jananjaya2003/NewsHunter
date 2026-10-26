@@ -1,0 +1,29 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Web app (uvicorn --reload)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": ["app.main:app", "--reload", "--host", "127.0.0.1", "--port", "8000"],
+            "envFile": "${workspaceFolder}/.env",
+            "jinja": true
+        },
+        {
+            "name": "E-paper monitor (Daily News)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "app.monitor.epaper_monitor",
+            "args": ["--publication", "daily-news"],
+            "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "name": "Current test file",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": ["-q", "${file}"]
+        }
+    ]
+}

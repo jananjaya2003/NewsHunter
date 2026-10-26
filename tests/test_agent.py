@@ -1,5 +1,5 @@
-from app.agent import deduplicate_stories
-from app.schemas import Category, ExtractedStory
+from app.ai.agent import deduplicate_stories
+from app.core.schemas import Category, ExtractedStory
 
 
 def story(title: str, page: int, confidence: float = 0.8) -> ExtractedStory:

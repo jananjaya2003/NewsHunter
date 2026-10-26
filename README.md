@@ -15,6 +15,32 @@ It also contains an optional, personal-use Daily News monitor that creates a
 local screenshot-only report from the publisher's article viewer. It does not
 automate a login or store a newspaper password.
 
+## Project structure
+
+```text
+NewsHunter/
+├── app/                      FastAPI application (Vercel entrypoint: app/main.py)
+│   ├── main.py               Routes, auth and page rendering
+│   ├── core/                 Settings, SQLite database, data models, background jobs
+│   ├── ai/                   Gemini/OpenAI clients and the PDF summarisation agent
+│   ├── medical/              Medical scope rules and tender classification
+│   ├── extraction/           PDF text extraction and Windows OCR of page images
+│   ├── monitor/              Daily e-paper monitor and Vercel Blob result store
+│   ├── templates/            Jinja2 HTML templates
+│   └── static/               CSS, JavaScript and icons
+├── tests/                    pytest suite, including medical false-negative tests
+├── docs/                     Architecture, AI engine, medical rules, operations, deployment
+├── scripts/windows/          Local runners and Windows scheduled-task installers
+├── .github/                  CI workflow, Dependabot, issue and pull request templates
+├── .vscode/                  Shared editor settings, debug configs and tasks
+├── .env.example              All supported settings (copy to .env)
+├── pyproject.toml            Dependencies and tool configuration
+└── vercel.json               Vercel function settings
+```
+
+Local-only folders `data/`, `reports/` and `.venv/` are created at runtime and
+are never committed.
+
 ## What the MVP does
 
 1. An editor manually downloads a newspaper using their valid subscription.
@@ -105,13 +131,13 @@ summarize articles.
 Run it manually:
 
 ```powershell
-.\run_epaper_monitor.ps1 -OpenReport
+.\scripts\windows\run_epaper_monitor.ps1 -OpenReport
 ```
 
 Install or refresh the Windows schedule (daily at 8:00 PM local time):
 
 ```powershell
-.\install_daily_schedule.ps1
+.\scripts\windows\install_daily_schedule.ps1
 ```
 
 Reports are written to `reports\YYYY-MM-DD\index.html`; `reports\latest.html`
@@ -135,7 +161,7 @@ schedule.
 Install the local site to start automatically after Windows sign-in:
 
 ```powershell
-.\install_web_app_startup.ps1
+.\scripts\windows\install_web_app_startup.ps1
 ```
 
 Use `Open News Hunter.url` in this folder to open the checker.

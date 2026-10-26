@@ -6,7 +6,7 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
-from app.config import Settings
+from app.core.config import Settings
 
 StructuredResult = TypeVar("StructuredResult", bound=BaseModel)
 

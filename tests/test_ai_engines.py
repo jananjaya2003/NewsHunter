@@ -3,9 +3,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.ai_engines import AIEngineError, GeminiEngine, OpenAIEngine, create_ai_engine
-from app.config import Settings
-from app.schemas import MedicalMatchBatch, MedicalMatchDecision
+from app.ai.engines import AIEngineError, GeminiEngine, OpenAIEngine, create_ai_engine
+from app.core.config import Settings
+from app.core.schemas import MedicalMatchBatch, MedicalMatchDecision
 
 
 def settings_for(provider: str) -> Settings:

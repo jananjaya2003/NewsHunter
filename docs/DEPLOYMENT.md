@@ -11,7 +11,7 @@
 - `.vercelignore`: keeps local data, tests and scripts out of CLI uploads.
 - `pyproject.toml`: dependencies and Vercel entrypoint.
 - `vercel.json`: FastAPI framework selection.
-- Root PowerShell scripts: optional local Windows runners and schedules.
+- `scripts/windows/`: optional local Windows runners and scheduled-task installers.
 
 Local secrets, browser profiles, databases, uploads, screenshots and reports
 are excluded from Git and Vercel. Keep these on your machine. Do not upload

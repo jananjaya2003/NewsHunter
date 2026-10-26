@@ -41,12 +41,12 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from app import ad_ocr
-from app.ai_engines import AIEngine, create_ai_engine
-from app.config import settings
-from app.opportunities import CATEGORIES, classify, dates_mentioned, institutions
-from app.rules import MEDICAL_SCOPE_RULES, medical_evidence_supported
-from app.schemas import MedicalMatchBatch, MedicalMatchDecision
+from app.ai.engines import AIEngine, create_ai_engine
+from app.core.config import settings
+from app.core.schemas import MedicalMatchBatch, MedicalMatchDecision
+from app.extraction import ad_ocr
+from app.medical.opportunities import CATEGORIES, classify, dates_mentioned, institutions
+from app.medical.rules import MEDICAL_SCOPE_RULES, medical_evidence_supported
 
 BASE_URL = "https://epaperst.lakehouse.lk/"
 COLOMBO = ZoneInfo("Asia/Colombo")

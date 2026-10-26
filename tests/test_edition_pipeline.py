@@ -5,9 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from app import ad_ocr, epaper_monitor
-from app.config import settings
-from app.epaper_monitor import (
+from app.core.config import settings
+from app.extraction import ad_ocr
+from app.monitor import epaper_monitor
+from app.monitor.epaper_monitor import (
     PUBLICATIONS,
     AvailabilityCache,
     EpaperClient,

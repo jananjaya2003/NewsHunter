@@ -4,7 +4,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $pythonPath = Join-Path $projectRoot '.venv\Scripts\python.exe'
 
 if (-not (Test-Path -LiteralPath $pythonPath)) {
@@ -17,7 +17,7 @@ try {
     $resultUrls = @()
     foreach ($name in $Publication) {
         # Checks the latest edition; a saved complete result is reused, not re-downloaded.
-        $output = & $pythonPath -m app.epaper_monitor --publication $name --log "data\epaper-monitor-$name.log"
+        $output = & $pythonPath -m app.monitor.epaper_monitor --publication $name --log "data\epaper-monitor-$name.log"
         # Exit code 3: the check worked but uploading to the online site did not.
         if ($LASTEXITCODE -ne 0) {
             $failed += $name
@@ -32,7 +32,7 @@ try {
         $listener = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
         if (-not $listener) {
             Start-Process -FilePath (Get-Command powershell.exe).Source -WindowStyle Hidden -ArgumentList @(
-                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $projectRoot 'run_web_app.ps1')
+                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'run_web_app.ps1')
             )
             Start-Sleep -Seconds 8
         }

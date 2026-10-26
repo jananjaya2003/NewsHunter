@@ -8,8 +8,8 @@ import requests
 from fastapi.testclient import TestClient
 
 import app.main as main_module
-from app.epaper_monitor import COLOMBO
 from app.main import app
+from app.monitor.epaper_monitor import COLOMBO
 
 client = TestClient(app)
 

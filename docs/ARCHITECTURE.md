@@ -44,13 +44,13 @@ each action and validates model output.
 
 - `app/main.py`: HTTP interface, authentication, upload validation, approval,
   editing, and publishing routes.
-- `app/pdf_extract.py`: PDF validation and page-aware text extraction/chunking.
-- `app/agent.py`: prompts, structured schemas, model calls, citation checks,
+- `app/extraction/pdf_extract.py`: PDF validation and page-aware text extraction/chunking.
+- `app/ai/agent.py`: prompts, structured schemas, model calls, citation checks,
   deduplication, and the final overview.
-- `app/ai_engines.py`: provider boundary with Gemini and OpenAI implementations.
-- `app/database.py`: small SQLite repository with parameterized queries.
-- `app/config.py`: environment-based configuration.
-- `app/epaper_monitor.py`: fail-closed Gemini matching, local safety review,
+- `app/ai/engines.py`: provider boundary with Gemini and OpenAI implementations.
+- `app/core/database.py`: small SQLite repository with parameterized queries.
+- `app/core/config.py`: environment-based configuration.
+- `app/monitor/epaper_monitor.py`: fail-closed Gemini matching, local safety review,
   atomic image/report replacement, and per-result provenance.
 
 ## Prompt-injection boundary

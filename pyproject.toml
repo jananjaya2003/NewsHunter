@@ -1,7 +1,7 @@
 [project]
-name = "daily-brief-agent"
+name = "news-hunter"
 version = "0.1.0"
-description = "Human-reviewed AI newspaper summarization agent"
+description = "Finds medical tenders and healthcare news in Sri Lankan e-papers for human review"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -26,11 +26,12 @@ dependencies = [
 requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["app"]
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [tool.setuptools.package-data]
 app = ["templates/*.html", "static/*"]
+"app.extraction" = ["*.ps1"]
 
 [project.optional-dependencies]
 dev = [

@@ -16,11 +16,15 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app import ad_ocr, result_store
-from app.agent import NewspaperAgent
-from app.config import IS_VERCEL, settings
-from app.database import Database
-from app.epaper_monitor import (
+from app.ai.agent import NewspaperAgent
+from app.core.config import IS_VERCEL, settings
+from app.core.database import Database
+from app.core.jobs import JobManager
+from app.core.schemas import Category
+from app.extraction import ad_ocr
+from app.medical.opportunities import CATEGORIES, DEFAULT_HIDDEN_CATEGORIES
+from app.monitor import result_store
+from app.monitor.epaper_monitor import (
     COLOMBO,
     DEFAULT_PUBLICATION,
     PUBLICATIONS,
@@ -31,9 +35,6 @@ from app.epaper_monitor import (
     image_cache_path,
     load_manifest,
 )
-from app.jobs import JobManager
-from app.opportunities import CATEGORIES, DEFAULT_HIDDEN_CATEGORIES
-from app.schemas import Category
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 LOGGER = logging.getLogger(__name__)

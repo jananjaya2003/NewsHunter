@@ -2,7 +2,7 @@ from pathlib import Path
 
 import fitz
 
-from app.pdf_extract import PageText, chunk_pages, extract_pages
+from app.extraction.pdf_extract import PageText, chunk_pages, extract_pages
 
 
 def test_chunk_pages_preserves_page_markers():

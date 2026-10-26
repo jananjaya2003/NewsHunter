@@ -24,8 +24,8 @@ from typing import Protocol
 import pymupdf
 import requests
 
-from app.config import IS_VERCEL, settings
-from app.epaper_monitor import (
+from app.core.config import IS_VERCEL, settings
+from app.monitor.epaper_monitor import (
     PUBLICATIONS,
     Publication,
     _atomic_write_text,

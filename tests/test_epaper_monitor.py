@@ -1,8 +1,9 @@
 import json
 from datetime import datetime
 
-from app import epaper_monitor
-from app.epaper_monitor import (
+from app.core.schemas import MedicalMatchBatch, MedicalMatchDecision
+from app.monitor import epaper_monitor
+from app.monitor.epaper_monitor import (
     COLOMBO,
     PUBLICATIONS,
     EpaperError,
@@ -12,7 +13,6 @@ from app.epaper_monitor import (
     plain_text,
     select_medical_stories,
 )
-from app.schemas import MedicalMatchBatch, MedicalMatchDecision
 
 
 class FakeMatcher:

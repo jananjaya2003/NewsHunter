@@ -6,9 +6,9 @@ import pymupdf
 from fastapi.testclient import TestClient
 
 import app.main as main_module
-from app import result_store
-from app.epaper_monitor import PUBLICATIONS, colombo_today, image_cache_path, manifest_path
 from app.main import app
+from app.monitor import result_store
+from app.monitor.epaper_monitor import PUBLICATIONS, colombo_today, image_cache_path, manifest_path
 from tests.test_monitor_page import SAVED_MANIFEST
 
 client = TestClient(app)

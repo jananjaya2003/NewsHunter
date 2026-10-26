@@ -1,7 +1,7 @@
 # AI engine configuration
 
-The medical-news pipeline is independent of the model provider. `app/agent.py`
-asks an `AIEngine` for validated Pydantic results; `app/ai_engines.py` translates
+The medical-news pipeline is independent of the model provider. `app/ai/agent.py`
+asks an `AIEngine` for validated Pydantic results; `app/ai/engines.py` translates
 that request into the selected provider's API.
 
 ## Gemini setup

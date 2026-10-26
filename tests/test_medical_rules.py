@@ -1,4 +1,4 @@
-from app.rules import medical_evidence_supported
+from app.medical.rules import medical_evidence_supported
 
 
 def test_accepts_exact_medical_evidence_from_source():
