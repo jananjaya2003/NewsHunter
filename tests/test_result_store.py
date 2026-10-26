@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 from datetime import timedelta
 
 import pymupdf
@@ -242,3 +243,37 @@ def test_cloud_block_explains_how_to_get_results(monkeypatch):
     assert "office PC" in main_module._publisher_failure(blocked)
     monkeypatch.setattr(main_module, "IS_VERCEL", False)
     assert main_module._publisher_failure(blocked) == "publisher answered HTTP 403"
+
+
+def test_office_pc_reads_only_blob_keys_from_pulled_env(monkeypatch, tmp_path):
+    pulled = tmp_path / ".env.vercel"
+    pulled.write_text(
+        'VERCEL="1"\nBLOB_STORE_ID="store_abc"\nVERCEL_OIDC_TOKEN="oidc-token"\n'
+        'GEMINI_API_KEY="[SENSITIVE]"\n',
+        encoding="utf-8",
+    )
+    for key in ("BLOB_READ_WRITE_TOKEN", "VERCEL_BLOB_READ_WRITE_TOKEN", "BLOB_STORE_ID",
+                "VERCEL_OIDC_TOKEN", "VERCEL"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(result_store, "IS_VERCEL", False)
+    monkeypatch.setattr(result_store, "PULLED_ENV", pulled)
+
+    assert result_store.enabled()
+    assert os.environ["BLOB_STORE_ID"] == "store_abc"
+    assert os.environ["VERCEL_OIDC_TOKEN"] == "oidc-token"
+    # VERCEL=1 would switch the office PC into online-site mode; it must not leak in.
+    assert "VERCEL" not in os.environ
+
+
+def test_no_blob_credentials_means_uploads_are_off(monkeypatch, tmp_path):
+    for key in ("BLOB_READ_WRITE_TOKEN", "VERCEL_BLOB_READ_WRITE_TOKEN", "BLOB_STORE_ID"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(result_store, "PULLED_ENV", tmp_path / "missing.env")
+    assert not result_store.enabled()
+
+
+def test_online_site_uses_store_id_credentials(monkeypatch):
+    monkeypatch.delenv("BLOB_READ_WRITE_TOKEN", raising=False)
+    monkeypatch.setenv("BLOB_STORE_ID", "store_abc")
+    monkeypatch.setattr(result_store, "IS_VERCEL", True)
+    assert result_store.remote_mode()

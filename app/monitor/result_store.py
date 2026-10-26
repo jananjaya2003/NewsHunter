@@ -4,7 +4,12 @@ The publisher's site sits behind Cloudflare bot protection that refuses cloud
 servers, and Windows OCR (needed to read tender adverts) only runs on Windows.
 So the office PC checks editions and uploads each result here, and the Vercel
 deployment only reads them. Blobs are private: the site's password still
-protects them. The token comes from BLOB_READ_WRITE_TOKEN.
+protects them.
+
+Credentials: a classic BLOB_READ_WRITE_TOKEN, or the store's OIDC setup
+(BLOB_STORE_ID plus a short-lived Vercel OIDC token). On Vercel the OIDC token
+arrives with each request; on the office PC `vercel env pull .env.vercel`
+refreshes it before each run (see scripts/windows/run_epaper_monitor.ps1).
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ from typing import Protocol
 
 import pymupdf
 import requests
+from dotenv import dotenv_values
 
 from app.core.config import IS_VERCEL, settings
 from app.monitor.epaper_monitor import (
@@ -41,6 +47,9 @@ INDEX = f"{ROOT}/index.json"
 MAX_IMAGE_WIDTH = 2000
 KEEP_DAYS = int(os.getenv("BLOB_KEEP_DAYS", "45"))
 INDEX_MAX_AGE_SECONDS = 60
+# Written by `vercel env pull`; it also sets VERCEL=1, so only Blob keys are read.
+PULLED_ENV = Path(__file__).resolve().parents[2] / ".env.vercel"
+PULLED_KEYS = ("BLOB_STORE_ID", "VERCEL_OIDC_TOKEN")
 
 
 class StoreError(RuntimeError):
@@ -92,8 +101,23 @@ class VercelBlobBackend:
                 raise StoreError(f"Deleting old results failed: {exc}") from exc
 
 
+def _read_write_token() -> str:
+    return os.getenv("BLOB_READ_WRITE_TOKEN") or os.getenv("VERCEL_BLOB_READ_WRITE_TOKEN") or ""
+
+
+def _load_pulled_credentials() -> None:
+    """On the office PC, use the OIDC Blob credentials from `vercel env pull`."""
+    if IS_VERCEL or _read_write_token() or not PULLED_ENV.is_file():
+        return
+    values = dotenv_values(PULLED_ENV)
+    for key in PULLED_KEYS:
+        if values.get(key) and not os.getenv(key):
+            os.environ[key] = values[key]
+
+
 def enabled() -> bool:
-    return bool(os.getenv("BLOB_READ_WRITE_TOKEN") or os.getenv("VERCEL_BLOB_READ_WRITE_TOKEN"))
+    _load_pulled_credentials()
+    return bool(_read_write_token() or os.getenv("BLOB_STORE_ID"))
 
 
 def remote_mode() -> bool:
@@ -305,7 +329,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     if not enabled():
-        print("BLOB_READ_WRITE_TOKEN is not set (add it to .env); nothing uploaded.")
+        print(
+            "No Blob credentials: run `npx vercel env pull .env.vercel --environment=production`"
+            " or set BLOB_READ_WRITE_TOKEN in .env; nothing uploaded."
+        )
         return 2
     report_root = Path(args.output)
     status = 0

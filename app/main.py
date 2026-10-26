@@ -309,6 +309,16 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def vercel_request_context(request: Request, call_next):
+    # Vercel Blob authenticates with the OIDC token sent in this request's headers.
+    if IS_VERCEL:
+        from vercel.headers import set_headers
+
+        set_headers(dict(request.headers))
+    return await call_next(request)
+
+
 @app.get("/", include_in_schema=False)
 def root() -> RedirectResponse:
     return RedirectResponse("/monitor", status_code=303)

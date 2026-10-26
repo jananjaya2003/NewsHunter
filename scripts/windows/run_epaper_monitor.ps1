@@ -13,6 +13,15 @@ if (-not (Test-Path -LiteralPath $pythonPath)) {
 
 Push-Location $projectRoot
 try {
+    # The online site's Blob store uses short-lived OIDC credentials; refresh them
+    # with the saved Vercel CLI login. If this fails, checks still run locally and
+    # the upload step reports the problem (exit code 3).
+    if (Test-Path -LiteralPath '.vercel\project.json') {
+        & npx.cmd --yes vercel@latest env pull .env.vercel --environment=production --yes 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning 'Could not refresh Vercel Blob credentials; run "npx vercel login" once.'
+        }
+    }
     $failed = @()
     $resultUrls = @()
     foreach ($name in $Publication) {
