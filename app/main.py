@@ -527,6 +527,8 @@ def api_availability(publication: str, month: str):
         dates = availability.month(selected, year, month_number)
     except (requests.RequestException, RuntimeError, ValueError) as exc:
         LOGGER.warning("Availability lookup failed: %s", exc)
+        if _cloud_blocked(exc):
+            raise HTTPException(502, CLOUD_BLOCKED_MESSAGE) from exc
         raise HTTPException(
             502,
             f"The publisher's edition calendar could not be reached ({_publisher_failure(exc)}).",

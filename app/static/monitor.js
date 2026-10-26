@@ -123,7 +123,7 @@ function setupFinder() {
       data = await loadMonth(viewYear, viewMonth);
     } catch (error) {
       calendar.replaceChildren(el("p", { class: "calendar-loading bad" },
-        `${error.message}. You can still type a date in the box.`));
+        `${error.message.replace(/.$/, "")}. You can still type a date in the box.`));
       return;
     }
     const header = el("div", { class: "calendar-head" });
