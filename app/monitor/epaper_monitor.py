@@ -1613,7 +1613,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _upload_for_online_site(output_root: Path, publication: Publication, checked: date) -> int:
     """Share the result with the Vercel site, which cannot reach the publisher itself."""
-    from app import result_store  # result_store imports this module
+    from app.monitor import result_store  # result_store imports this module
 
     if not result_store.enabled():
         return 0

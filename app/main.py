@@ -421,16 +421,23 @@ def api_check(publication: str = Form(...), edition_date: str = Form(""), force:
     refresh = force in {"1", "true", "on"}
 
     def runner(progress) -> str:
-        if parsed is None:
-            _, result = generate_latest_report(MONITOR_REPORT_ROOT, selected, progress=progress)
-        else:
-            _, result = generate_report_for_date(
-                MONITOR_REPORT_ROOT,
-                selected,
-                datetime.combine(parsed, datetime.min.time(), tzinfo=COLOMBO),
-                progress=progress,
-                force=refresh,
-            )
+        try:
+            if parsed is None:
+                _, result = generate_latest_report(
+                    MONITOR_REPORT_ROOT, selected, progress=progress
+                )
+            else:
+                _, result = generate_report_for_date(
+                    MONITOR_REPORT_ROOT,
+                    selected,
+                    datetime.combine(parsed, datetime.min.time(), tzinfo=COLOMBO),
+                    progress=progress,
+                    force=refresh,
+                )
+        except requests.HTTPError as exc:
+            if _cloud_blocked(exc):
+                raise RuntimeError(CLOUD_BLOCKED_MESSAGE) from exc
+            raise
         return result.strftime("%Y-%m-%d")
 
     job = jobs.submit(selected.key, edition_date or "latest", runner)
@@ -448,8 +455,27 @@ def api_job(job_id: str):
     return data
 
 
+CLOUD_BLOCKED_MESSAGE = (
+    "The newspaper's website blocks cloud servers such as this one (HTTP 403), so "
+    "checks must run on the office PC. Connect a Vercel Blob store to this project "
+    "and add the same BLOB_READ_WRITE_TOKEN to the office PC's .env; the PC then "
+    "uploads each result and this site shows it."
+)
+
+
+def _cloud_blocked(exc: Exception) -> bool:
+    return (
+        IS_VERCEL
+        and isinstance(exc, requests.HTTPError)
+        and exc.response is not None
+        and exc.response.status_code == 403
+    )
+
+
 def _publisher_failure(exc: Exception) -> str:
     """Short, non-sensitive reason a publisher request failed, for the screen."""
+    if _cloud_blocked(exc):
+        return CLOUD_BLOCKED_MESSAGE
     if isinstance(exc, requests.HTTPError) and exc.response is not None:
         return f"publisher answered HTTP {exc.response.status_code}"
     if isinstance(exc, requests.Timeout):

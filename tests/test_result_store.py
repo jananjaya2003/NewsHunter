@@ -205,3 +205,40 @@ def test_online_site_reports_unchecked_date_and_missing_image(monkeypatch, tmp_p
     image = client.get(f"/api/image/daily-news/{EDITION.isoformat()}/advert-0")
     assert image.status_code == 404
     assert "source link" in image.json()["detail"]
+
+
+def test_office_pc_check_uploads_result_for_online_site(monkeypatch, tmp_path):
+    # Runs the real import inside the monitor's upload step (it broke once silently).
+    from app.monitor import epaper_monitor
+
+    calls = []
+    monkeypatch.setattr(result_store, "enabled", lambda: True)
+    monkeypatch.setattr(
+        result_store, "publish_edition",
+        lambda root, publication, checked: calls.append(checked) or {"image_failures": []},
+    )
+    assert epaper_monitor._upload_for_online_site(tmp_path, DAILY, EDITION) == 0
+    assert calls == [EDITION]
+
+
+def test_failed_upload_is_reported_not_hidden(monkeypatch, tmp_path):
+    from app.monitor import epaper_monitor
+
+    def failing(*args):
+        raise result_store.StoreError("no token")
+
+    monkeypatch.setattr(result_store, "enabled", lambda: True)
+    monkeypatch.setattr(result_store, "publish_edition", failing)
+    assert epaper_monitor._upload_for_online_site(tmp_path, DAILY, EDITION) == 3
+
+
+def test_cloud_block_explains_how_to_get_results(monkeypatch):
+    import requests
+
+    response = requests.Response()
+    response.status_code = 403
+    blocked = requests.HTTPError("403 Client Error: Forbidden", response=response)
+    monkeypatch.setattr(main_module, "IS_VERCEL", True)
+    assert "office PC" in main_module._publisher_failure(blocked)
+    monkeypatch.setattr(main_module, "IS_VERCEL", False)
+    assert main_module._publisher_failure(blocked) == "publisher answered HTTP 403"
