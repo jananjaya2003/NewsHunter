@@ -1,5 +1,6 @@
 param(
-    [string]$TaskName = 'Daily News Medical Article Report'
+    [string]$TaskName = 'News Hunter Daily Tender Check',
+    [string]$At = '7:30 AM'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,14 +13,14 @@ $action = New-ScheduledTaskAction `
     -Execute $powerShellPath `
     -Argument $taskArguments `
     -WorkingDirectory $projectRoot
-$trigger = New-ScheduledTaskTrigger -Daily -At '8:00 PM'
+$trigger = New-ScheduledTaskTrigger -Daily -At $At
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -RunOnlyIfNetworkAvailable `
     -WakeToRun `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
-    -ExecutionTimeLimit (New-TimeSpan -Hours 1)
+    -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 $principal = New-ScheduledTaskPrincipal `
     -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
     -LogonType Interactive `
@@ -31,7 +32,7 @@ Register-ScheduledTask `
     -Trigger $trigger `
     -Settings $settings `
     -Principal $principal `
-    -Description 'Creates a local, screenshot-only Daily News medical-services article report at 8:00 PM.' `
+    -Description "Checks the latest Daily News and Sunday Observer editions for medical tenders at $At (or as soon as the PC is on) and opens the results." `
     -Force | Out-Null
 
 Get-ScheduledTask -TaskName $TaskName | Select-Object TaskName, State
