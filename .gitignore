@@ -1,6 +1,7 @@
 # Secrets (API keys) - never commit
 .env
 .env.*
+!.env.example
 
 # Python environment and tool caches
 .venv/
@@ -16,3 +17,6 @@ reports/
 
 # Editor
 .vscode/
+
+# Vercel CLI project link
+.vercel/

@@ -6,6 +6,9 @@
 - `tests/`: regression tests including medical completeness checks.
 - `docs/`: operations, safety and deployment documentation.
 - `.github/workflows/ci.yml`: lint and tests on pushes and pull requests.
+- `.github/dependabot.yml`: weekly dependency and action update PRs.
+- `.env.example`: every supported setting; copy to `.env` locally.
+- `.vercelignore`: keeps local data, tests and scripts out of CLI uploads.
 - `pyproject.toml`: dependencies and Vercel entrypoint.
 - `vercel.json`: FastAPI framework selection.
 - Root PowerShell scripts: optional local Windows runners and schedules.
