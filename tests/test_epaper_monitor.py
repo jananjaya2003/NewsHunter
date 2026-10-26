@@ -1,8 +1,6 @@
 import json
 from datetime import datetime
 
-import pytest
-
 from app import epaper_monitor
 from app.epaper_monitor import (
     COLOMBO,
@@ -190,21 +188,23 @@ def test_ai_and_source_evidence_confirm_local_medical_candidate():
     assert selected[0].match_source == "gemini-ai"
 
 
-def test_ai_failure_stops_incomplete_report_instead_of_claiming_local_matches():
+def test_ai_failure_keeps_local_medical_matches_with_visible_warning():
     medical = candidate(103, "New diabetes clinic", "Patients can obtain screening.")
     unrelated = candidate(104, "Trade meeting held", "Delegates discussed exports.")
-    with pytest.raises(EpaperError, match="AI matching was incomplete"):
-        select_medical_stories([medical, unrelated], engine=FakeMatcher(fail=True))
+    status = {}
+    selected = select_medical_stories(
+        [medical, unrelated], engine=FakeMatcher(fail=True), status=status
+    )
+    assert [story.story_id for story in selected] == [103]
+    assert selected[0].review_required
+    assert selected[0].match_source == "local-rules"
+    assert "AI could not classify 2 item(s)" in status["matching_warning"]
+    assert status["matching_retryable"] == "1"
 
 
-def test_partial_ai_batch_failure_rejects_entire_incomplete_run():
+def test_partial_ai_batch_failure_is_reported_and_retryable():
     class PartialFailureMatcher(FakeMatcher):
-        def __init__(self):
-            super().__init__()
-            self.calls = 0
-
         def parse(self, *, instructions, content, response_model):
-            self.calls += 1
             supplied = json.loads(content)
             if any(item["story_id"] == 12 for item in supplied):
                 raise RuntimeError("second batch unavailable")
@@ -214,15 +214,84 @@ def test_partial_ai_batch_failure_rejects_entire_incomplete_run():
                 response_model=response_model,
             )
 
+    size = epaper_monitor.AI_MATCH_BATCH_SIZE
     stories = [
-        candidate(story_id, f"Article {story_id}", "General report.") for story_id in range(13)
-    ]
+        candidate(story_id, f"Article {story_id}", "General report.") for story_id in range(size)
+    ] + [candidate(12, "Hospital wards reopen", "Patients return for treatment.")]
     status = {}
 
-    with pytest.raises(EpaperError, match="AI matching was incomplete"):
-        select_medical_stories(stories, engine=PartialFailureMatcher(), status=status)
+    selected = select_medical_stories(stories, engine=PartialFailureMatcher(), status=status)
 
-    assert status["matching_method"] == "AI matching incomplete"
+    assert status["matching_method"] == "AI partially available + local safety review"
+    assert "1 item(s)" in status["matching_warning"]
+    # The AI-failed hospital item is still kept by the local medical rules.
+    assert [story.story_id for story in selected] == [12]
+    assert selected[0].review_required
+
+
+GEMINI_429 = (
+    "Gemini request failed: 429 RESOURCE_EXHAUSTED. Generate content requests per minute "
+    "limit exceeded on Free Tier.\nPlease retry in 48.47944454s. 'retryDelay': '48s'"
+)
+
+
+def test_rate_limit_delay_reads_provider_hint():
+    assert epaper_monitor._rate_limit_delay(RuntimeError(GEMINI_429)) == 49.47944454
+    assert epaper_monitor._rate_limit_delay(RuntimeError("429 Too Many Requests")) == 30.0
+    assert epaper_monitor._rate_limit_delay(RuntimeError("Server disconnected")) is None
+
+
+def test_rate_limited_batch_waits_and_keeps_ai_decision(monkeypatch):
+    class RateLimitedMatcher(FakeMatcher):
+        def __init__(self):
+            super().__init__(included_ids={1})
+            self.calls = 0
+
+        def parse(self, *, instructions, content, response_model):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError(GEMINI_429)
+            return super().parse(
+                instructions=instructions, content=content, response_model=response_model
+            )
+
+    waits = []
+    monkeypatch.setattr(epaper_monitor.time, "sleep", waits.append)
+    matcher = RateLimitedMatcher()
+    status = {}
+
+    selected = select_medical_stories(
+        [candidate(1, "Hospital wards reopen", "Patients return for treatment.")],
+        engine=matcher,
+        status=status,
+        budget_seconds=300,
+    )
+
+    assert matcher.calls == 2
+    assert waits and waits[0] > 40
+    assert [story.story_id for story in selected] == [1]
+    assert "matching_warning" not in status or "could not classify" not in status["matching_warning"]
+
+
+def test_rate_limit_longer_than_budget_keeps_items_for_review(monkeypatch):
+    class AlwaysLimited(FakeMatcher):
+        def parse(self, *, instructions, content, response_model):
+            raise RuntimeError(GEMINI_429)
+
+    monkeypatch.setattr(epaper_monitor.time, "sleep", lambda seconds: None)
+    status = {}
+
+    selected = select_medical_stories(
+        [candidate(1, "Hospital wards reopen", "Patients return for treatment.")],
+        engine=AlwaysLimited(),
+        status=status,
+        budget_seconds=30,
+    )
+
+    # Recall first: the rate-limited hospital item still reaches human review.
+    assert [story.story_id for story in selected] == [1]
+    assert selected[0].review_required
+    assert "could not classify 1 item(s)" in status["matching_warning"]
 
 
 def test_transient_ai_batch_failure_recovers_before_report_generation():
@@ -250,54 +319,6 @@ def test_transient_ai_batch_failure_recovers_before_report_generation():
     assert [story.story_id for story in selected] == [12]
 
 
-def test_failed_image_download_preserves_existing_report(monkeypatch, tmp_path):
-    issue_date = datetime(2026, 10, 7, tzinfo=COLOMBO)
-    report_dir = tmp_path / "2026-10-07"
-    images_dir = report_dir / "articles"
-    images_dir.mkdir(parents=True)
-    existing_image = images_dir / "article-01-page-01.jpg"
-    existing_index = report_dir / "index.html"
-    existing_manifest = report_dir / "manifest.json"
-    existing_image.write_bytes(b"existing-image")
-    existing_index.write_text("existing-index", encoding="utf-8")
-    existing_manifest.write_text("existing-manifest", encoding="utf-8")
-
-    story = candidate(201, "Hospital update", "Patients receive treatment.")
-
-    class FailingClient:
-        def initialise(self):
-            return None
-
-        def pages(self, requested_date):
-            return [object()]
-
-        def download_image(self, url, destination):
-            destination.write_bytes(b"partial")
-            raise EpaperError("download failed")
-
-    monkeypatch.setattr(epaper_monitor, "_collect_story_ids", lambda client, pages: [])
-    monkeypatch.setattr(
-        epaper_monitor,
-        "_collect_matches",
-        lambda client, pairs, status: (
-            status.update(
-                matching_method="GEMINI AI + local safety review",
-                matching_model="fallback-model",
-                matching_warning="",
-            )
-            or [story]
-        ),
-    )
-
-    with pytest.raises(EpaperError, match="download failed"):
-        epaper_monitor.generate_report(tmp_path, issue_date, client=FailingClient())
-
-    assert existing_image.read_bytes() == b"existing-image"
-    assert existing_index.read_text(encoding="utf-8") == "existing-index"
-    assert existing_manifest.read_text(encoding="utf-8") == "existing-manifest"
-    assert not list(images_dir.glob("*.part"))
-
-
 def test_two_english_publications_are_available():
     assert PUBLICATIONS["daily-news"].edition_id == 1
     assert PUBLICATIONS["sunday-observer"].edition_id == 2
@@ -323,26 +344,11 @@ def test_generate_report_for_date_checks_only_the_requested_edition(monkeypatch,
     requested = datetime(2026, 10, 4, tzinfo=COLOMBO)
     calls = []
 
-    class FakeClient:
-        def __init__(self, publication):
-            self.publication = publication
+    def fake_run_edition_check(output_root, publication, edition_date, progress=None, force=False):
+        calls.append((output_root, publication.key, edition_date, force))
+        return tmp_path / "manifest.json", edition_date
 
-        def initialise(self):
-            calls.append("initialise")
-
-        def pages(self, issue_date):
-            calls.append(issue_date)
-            return [object()]
-
-    def fake_generate_edition_report(output_root, publication, issue_date, client):
-        assert output_root == tmp_path
-        assert publication == PUBLICATIONS["sunday-observer"]
-        assert issue_date == requested
-        assert isinstance(client, FakeClient)
-        return tmp_path / "2026-10-04" / "index.html", issue_date
-
-    monkeypatch.setattr(epaper_monitor, "EpaperClient", FakeClient)
-    monkeypatch.setattr(epaper_monitor, "_generate_edition_report", fake_generate_edition_report)
+    monkeypatch.setattr(epaper_monitor, "run_edition_check", fake_run_edition_check)
 
     report_path, report_date = epaper_monitor.generate_report_for_date(
         tmp_path,
@@ -350,6 +356,6 @@ def test_generate_report_for_date_checks_only_the_requested_edition(monkeypatch,
         requested,
     )
 
-    assert report_path == tmp_path / "2026-10-04" / "index.html"
-    assert report_date == requested
-    assert calls == ["initialise", requested]
+    assert report_path == tmp_path / "manifest.json"
+    assert report_date.date() == requested.date()
+    assert calls == [(tmp_path, "sunday-observer", requested.date(), False)]

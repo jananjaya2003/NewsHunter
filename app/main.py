@@ -1,20 +1,22 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import secrets
+import threading
 from base64 import b64decode
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
+import pymupdf
 import requests
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from app import ad_ocr
 from app.agent import NewspaperAgent
 from app.config import IS_VERCEL, settings
 from app.database import Database
@@ -22,11 +24,15 @@ from app.epaper_monitor import (
     COLOMBO,
     DEFAULT_PUBLICATION,
     PUBLICATIONS,
-    EpaperClient,
-    PageInfo,
+    AvailabilityCache,
+    colombo_today,
     generate_latest_report,
     generate_report_for_date,
+    image_cache_path,
+    load_manifest,
 )
+from app.jobs import JobManager
+from app.opportunities import CATEGORIES, DEFAULT_HIDDEN_CATEGORIES
 from app.schemas import Category
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -38,18 +44,26 @@ MONITOR_REPORT_ROOT.mkdir(parents=True, exist_ok=True)
 database = Database(settings.database_path)
 database.initialize()
 agent = NewspaperAgent(settings, database)
+jobs = JobManager()
+availability = AvailabilityCache(MONITOR_REPORT_ROOT / "_cache" / "availability.json")
 
-app = FastAPI(title="News Hunter", version="0.2.0")
+app = FastAPI(title="News Hunter", version="0.3.0")
 APP_ROOT = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=APP_ROOT / "static"), name="static")
-app.mount("/monitor-files", StaticFiles(directory=MONITOR_REPORT_ROOT), name="monitor-files")
 templates = Jinja2Templates(directory=APP_ROOT / "templates")
 
-IMAGE_HOSTS = {"d1dtajqni3g43z.cloudfront.net", "epaperst.lakehouse.lk"}
-MAX_IMAGE_BYTES = 4 * 1024 * 1024
+IMAGE_HOSTS = {"d1dtajqni3g43z.cloudfront.net", "dnsofs.avahan.net", "epaperst.lakehouse.lk"}
+MAX_IMAGE_BYTES = 16 * 1024 * 1024
+THUMBNAIL_WIDTHS = {360, 640}
+_image_locks: dict[str, threading.Lock] = {}
+_image_locks_guard = threading.Lock()
 
 
-def _publisher_image_response(source_url: str) -> Response:
+def _cache_root() -> Path:
+    return MONITOR_REPORT_ROOT / "_cache"
+
+
+def _validate_image_url(source_url: str) -> None:
     parsed = urlsplit(source_url)
     try:
         valid_port = parsed.port in {None, 443}
@@ -60,10 +74,14 @@ def _publisher_image_response(source_url: str) -> Response:
         or parsed.username or parsed.password or not valid_port
     ):
         raise HTTPException(400, "Invalid publisher image source.")
+
+
+def _download_publisher_image(source_url: str) -> bytes:
+    _validate_image_url(source_url)
     try:
         with requests.get(
-            source_url, timeout=(5, 15), stream=True, allow_redirects=False,
-            headers={"Referer": "https://epaperst.lakehouse.lk/"},
+            source_url, timeout=(5, 30), stream=True, allow_redirects=False,
+            headers={"Referer": "https://epaperst.lakehouse.lk/", "User-Agent": "Mozilla/5.0"},
         ) as upstream:
             if upstream.status_code != 200:
                 raise HTTPException(502, "Publisher image unavailable; review the source link.")
@@ -79,35 +97,104 @@ def _publisher_image_response(source_url: str) -> Response:
                 raise HTTPException(502, "Publisher returned an empty image.")
     except requests.RequestException as exc:
         raise HTTPException(502, "Publisher image request failed; use the source link.") from exc
-    return Response(
-        bytes(content), media_type=media_type,
-        headers={"Cache-Control": "private, max-age=300"},
-    )
+    return bytes(content)
 
 
-@app.get("/monitor-image")
-def monitor_image(source_url: str):
-    return _publisher_image_response(source_url)
+def _cached_image(source_url: str) -> Path:
+    """Fetch a publisher image once and keep it in the local cache."""
+    path = image_cache_path(_cache_root(), source_url)
+    if path.is_file():
+        return path
+    with _image_locks_guard:
+        lock = _image_locks.setdefault(path.name, threading.Lock())
+    with lock:
+        if not path.is_file():
+            content = _download_publisher_image(source_url)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_name(f".{secrets.token_hex(5)}.part")
+            try:
+                temporary.write_bytes(content)
+                temporary.replace(path)
+            finally:
+                temporary.unlink(missing_ok=True)
+    return path
 
 
-@app.get("/monitor-image/{publication}/{edition_date}/{page_id}/{story_id}")
-def legacy_monitor_image(publication: str, edition_date: str, page_id: int, story_id: int):
-    selected = PUBLICATIONS.get(publication)
-    if selected is None or page_id <= 0 or story_id <= 0:
-        raise HTTPException(400, "Invalid article source.")
+def _thumbnail(source: Path, width: int) -> Path:
+    destination = source.parent.parent / "thumbs" / f"{source.stem}-{width}.jpg"
+    if destination.is_file():
+        return destination
+    pixmap = pymupdf.Pixmap(source.read_bytes())
+    if pixmap.alpha:
+        pixmap = pymupdf.Pixmap(pixmap, 0)
+    factor = 0
+    while pixmap.width >> (factor + 1) >= width:
+        factor += 1
+    if factor:
+        pixmap.shrink(factor)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{secrets.token_hex(5)}.part")
     try:
-        date.fromisoformat(edition_date)
+        temporary.write_bytes(pixmap.tobytes("jpg", jpg_quality=78))
+        temporary.replace(destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return destination
+
+
+def _parse_edition_date(value: str) -> date:
+    try:
+        parsed = date.fromisoformat(value)
     except ValueError as exc:
         raise HTTPException(400, "Invalid edition date.") from exc
-    client = EpaperClient(publication=selected)
-    try:
-        client.initialise()
-        story = client.story(PageInfo(page_id, "unknown", edition_date), story_id)
-    except Exception as exc:
-        raise HTTPException(502, "Article image could not be retrieved; use the source link.") from exc
-    if story is None or not story.image_url:
+    if parsed.isoformat() != value:
+        raise HTTPException(400, "Invalid edition date.")
+    # The publisher often uploads tomorrow's paper the evening before.
+    if parsed > colombo_today() + timedelta(days=1):
+        raise HTTPException(400, "Edition date cannot be in the future.")
+    return parsed
+
+
+def _publication(key: str):
+    selected = PUBLICATIONS.get(key)
+    if selected is None:
+        raise HTTPException(400, "Unknown newspaper selection.")
+    return selected
+
+
+def _manifest_item(publication_key: str, edition_date: str, uid: str) -> dict:
+    publication = _publication(publication_key)
+    manifest = load_manifest(MONITOR_REPORT_ROOT, publication, _parse_edition_date(edition_date))
+    if manifest is None:
+        raise HTTPException(404, "This edition has not been checked yet.")
+    for item in manifest.get("articles", []):
+        if item.get("uid") == uid:
+            return item
+    for item in manifest.get("unscreened", []):
+        if f"unscreened-{item.get('object_id')}-{item.get('page_id')}" == uid:
+            return item
+    raise HTTPException(404, "Item not found in this edition.")
+
+
+@app.get("/api/image/{publication}/{edition_date}/{uid}")
+def edition_image(publication: str, edition_date: str, uid: str, w: int = 0, download: int = 0):
+    """Same-origin image so the browser can crop and resize it on a canvas."""
+    item = _manifest_item(publication, edition_date, uid)
+    source_url = item.get("image_url") or ""
+    if not source_url:
         raise HTTPException(404, "Article image unavailable; use the source link.")
-    return _publisher_image_response(story.image_url)
+    path = _cached_image(source_url)
+    if w:
+        if w not in THUMBNAIL_WIDTHS:
+            raise HTTPException(400, "Unsupported thumbnail width.")
+        try:
+            path = _thumbnail(path, w)
+        except (RuntimeError, ValueError) as exc:
+            LOGGER.warning("Thumbnail failed for %s: %s", uid, exc)
+    headers = {"Cache-Control": "private, max-age=86400"}
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="{publication}-{edition_date}-{uid}.jpg"'
+    return Response(path.read_bytes(), media_type="image/jpeg", headers=headers)
 
 
 def _unauthorized() -> Response:
@@ -166,7 +253,7 @@ async def add_security_headers(request: Request, call_next):
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
     response.headers.setdefault(
         "Content-Security-Policy",
-        "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+        "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; "
         "script-src 'self'; object-src 'none'; base-uri 'self'; "
         "form-action 'self'; frame-ancestors 'none'",
     )
@@ -185,6 +272,34 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _web_manifest(publication_key: str, manifest: dict) -> dict:
+    """Manifest plus the same-origin URLs the page needs."""
+    edition_date = manifest["edition_date"]
+    for item in manifest.get("articles", []):
+        base = f"/api/image/{publication_key}/{edition_date}/{item['uid']}"
+        item["image_web_url"] = base if item.get("image_url") else ""
+        item["thumb_web_url"] = f"{base}?w=640" if item.get("image_url") else ""
+    for item in manifest.get("unscreened", []):
+        item["uid"] = f"unscreened-{item.get('object_id')}-{item.get('page_id')}"
+        base = f"/api/image/{publication_key}/{edition_date}/{item['uid']}"
+        item["thumb_web_url"] = f"{base}?w=360" if item.get("image_url") else ""
+        item["source_url"] = (
+            f"https://epaperst.lakehouse.lk/home/ArticleView?eid="
+            f"{PUBLICATIONS[publication_key].edition_id}"
+            f"&edate={date.fromisoformat(edition_date):%d/%m/%Y}&pgid={item.get('page_id')}"
+        )
+    return manifest
+
+
+def _js_item(item: dict) -> dict:
+    keys = (
+        "uid", "kind", "page_number", "title", "categories", "primary_category", "institutions",
+        "dates_mentioned", "review_required", "match_reason", "source_url", "image_web_url",
+        "borderline",
+    )
+    return {key: item.get(key) for key in keys}
+
+
 @app.get("/monitor", response_class=HTMLResponse)
 def monitor_home(
     request: Request,
@@ -194,36 +309,16 @@ def monitor_home(
     error: str = "",
 ):
     selected = PUBLICATIONS.get(publication, DEFAULT_PUBLICATION)
-    articles: list[dict] = []
-    generated_at = ""
-    matching_method = ""
-    matching_model = ""
-    matching_warning = ""
+    manifest = None
     if edition_date:
         try:
-            date.fromisoformat(edition_date)
-        except ValueError:
+            parsed = _parse_edition_date(edition_date)
+        except HTTPException:
             edition_date = ""
-        if edition_date:
-            manifest_path = MONITOR_REPORT_ROOT / selected.key / edition_date / "manifest.json"
-            if manifest_path.is_file():
-                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                generated_at = str(manifest.get("generated_at") or "")
-                matching_method = str(manifest.get("matching_method") or "")
-                matching_model = str(manifest.get("matching_model") or "")
-                matching_warning = str(manifest.get("matching_warning") or "")
-                for item in manifest.get("articles", []):
-                    article = dict(item)
-                    article["image_web_url"] = (
-                        f"/monitor-files/{selected.key}/{edition_date}/{item['image_file']}"
-                    )
-                    if IS_VERCEL and item.get("image_file"):
-                        article["image_web_url"] = (
-                            "/monitor-image?source_url=" + quote(item["image_url"], safe="")
-                            if item.get("image_url") else
-                            f"/monitor-image/{selected.key}/{edition_date}/{item['page_id']}/{item['story_id']}"
-                        )
-                    articles.append(article)
+        else:
+            manifest = load_manifest(MONITOR_REPORT_ROOT, selected, parsed)
+            if manifest:
+                manifest = _web_manifest(selected.key, manifest)
     return templates.TemplateResponse(
         request,
         "monitor.html",
@@ -232,46 +327,35 @@ def monitor_home(
             "selected_publication": selected,
             "edition_date": edition_date,
             "selected_date": requested_date or edition_date,
-            "today": datetime.now(COLOMBO).date().isoformat(),
-            "articles": articles,
-            "generated_at": generated_at,
-            "matching_method": matching_method,
-            "matching_model": matching_model,
-            "matching_warning": matching_warning,
+            "today": colombo_today().isoformat(),
+            "max_date": (colombo_today() + timedelta(days=1)).isoformat(),
+            "manifest": manifest,
+            "articles": (manifest or {}).get("articles", []),
+            "js_items": [_js_item(item) for item in (manifest or {}).get("articles", [])],
+            "categories": CATEGORIES.values(),
+            "categories_by_key": CATEGORIES,
+            "hidden_categories": DEFAULT_HIDDEN_CATEGORIES,
             "error": error,
             "is_vercel": IS_VERCEL,
+            "ocr_available": ad_ocr.ocr_available(),
+            "ai_configured": settings.ai_configured,
         },
     )
 
 
 @app.post("/monitor/check")
 def monitor_check(publication: str = Form(...), edition_date: str = Form("")):
-    selected = PUBLICATIONS.get(publication)
-    if selected is None:
-        raise HTTPException(400, "Unknown newspaper selection.")
+    """Form fallback for browsers without JavaScript: checks synchronously."""
+    selected = _publication(publication)
     issue_date = None
     if edition_date:
-        try:
-            parsed_date = date.fromisoformat(edition_date)
-        except ValueError as exc:
-            raise HTTPException(400, "Invalid edition date.") from exc
-        if parsed_date.isoformat() != edition_date:
-            raise HTTPException(400, "Invalid edition date.")
-        if parsed_date > datetime.now(COLOMBO).date():
-            raise HTTPException(400, "Edition date cannot be in the future.")
+        parsed_date = _parse_edition_date(edition_date)
         issue_date = datetime.combine(parsed_date, datetime.min.time(), tzinfo=COLOMBO)
     try:
         if issue_date is None:
-            _, result_date = generate_latest_report(
-                MONITOR_REPORT_ROOT / selected.key,
-                selected,
-            )
+            _, result_date = generate_latest_report(MONITOR_REPORT_ROOT, selected)
         else:
-            _, result_date = generate_report_for_date(
-                MONITOR_REPORT_ROOT / selected.key,
-                selected,
-                issue_date,
-            )
+            _, result_date = generate_report_for_date(MONITOR_REPORT_ROOT, selected, issue_date)
     except Exception as exc:
         LOGGER.exception("Manual e-paper check failed for %s", selected.name)
         requested = f"&requested_date={edition_date}" if edition_date else ""
@@ -283,6 +367,83 @@ def monitor_check(publication: str = Form(...), edition_date: str = Form("")):
         f"/monitor?publication={selected.key}&edition_date={result_date:%Y-%m-%d}",
         status_code=303,
     )
+
+
+@app.post("/api/check")
+def api_check(publication: str = Form(...), edition_date: str = Form(""), force: str = Form("")):
+    selected = _publication(publication)
+    parsed = _parse_edition_date(edition_date) if edition_date else None
+    refresh = force in {"1", "true", "on"}
+
+    def runner(progress) -> str:
+        if parsed is None:
+            _, result = generate_latest_report(MONITOR_REPORT_ROOT, selected, progress=progress)
+        else:
+            _, result = generate_report_for_date(
+                MONITOR_REPORT_ROOT,
+                selected,
+                datetime.combine(parsed, datetime.min.time(), tzinfo=COLOMBO),
+                progress=progress,
+                force=refresh,
+            )
+        return result.strftime("%Y-%m-%d")
+
+    job = jobs.submit(selected.key, edition_date or "latest", runner)
+    return JSONResponse(job.to_dict(), status_code=202)
+
+
+@app.get("/api/jobs/{job_id}")
+def api_job(job_id: str):
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, "Check not found; it may have finished before a restart.")
+    data = job.to_dict()
+    if job.status == "done":
+        data["result_url"] = f"/monitor?publication={job.publication}&edition_date={job.result_date}"
+    return data
+
+
+@app.get("/api/availability")
+def api_availability(publication: str, month: str):
+    selected = _publication(publication)
+    try:
+        year, month_number = (int(part) for part in month.split("-", 1))
+        first = date(year, month_number, 1)
+    except ValueError as exc:
+        raise HTTPException(400, "Month must look like 2026-10.") from exc
+    if first < date(2015, 1, 1) or first > colombo_today() + timedelta(days=32):
+        raise HTTPException(400, "Month is outside the supported range.")
+    try:
+        dates = availability.month(selected, year, month_number)
+    except (requests.RequestException, RuntimeError, ValueError) as exc:
+        LOGGER.warning("Availability lookup failed: %s", exc)
+        raise HTTPException(502, "The publisher's edition calendar could not be reached.") from exc
+    checked = {}
+    for value in dates:
+        manifest = load_manifest(MONITOR_REPORT_ROOT, selected, value)
+        if manifest:
+            checked[value.isoformat()] = {
+                "complete": bool(manifest.get("complete")),
+                "count": manifest.get("article_count", 0),
+                "tenders": manifest.get("category_counts", {}).get("medical_tender", 0),
+            }
+    return {
+        "publication": selected.key,
+        "month": f"{year:04d}-{month_number:02d}",
+        "dates": [value.isoformat() for value in dates],
+        "checked": checked,
+        "today": colombo_today().isoformat(),
+    }
+
+
+@app.get("/api/editions/{publication}/{edition_date}")
+def api_edition(publication: str, edition_date: str):
+    """Machine-readable results (for spreadsheets, scripts or an MCP wrapper)."""
+    selected = _publication(publication)
+    manifest = load_manifest(MONITOR_REPORT_ROOT, selected, _parse_edition_date(edition_date))
+    if manifest is None:
+        raise HTTPException(404, "This edition has not been checked yet.")
+    return _web_manifest(selected.key, manifest)
 
 
 @app.get("/admin", response_class=HTMLResponse)

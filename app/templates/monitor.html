@@ -1,108 +1,301 @@
 {% extends "base.html" %}
-{% block title %}News Hunter · Medical newspaper checker{% endblock %}
+{% block title %}News Hunter · Medical tenders and health-sector news{% endblock %}
 {% block content %}
-<section class="hunter-hero">
+{% if not manifest %}
+<section class="hunter-hero compact">
   <div class="hero-copy">
-    <p class="eyebrow light">MEDICAL NEWS, DIRECT FROM THE PAGE</p>
-    <h1>Find the stories that matter to health care.</h1>
-    <p>News Hunter scans the latest English newspaper editions and brings you the original medical and healthcare-service articles—without rewriting them.</p>
+    <p class="eyebrow light">MEDICAL SUPPLY OPPORTUNITIES</p>
+    <h1>Find hospital tenders and health-sector news in the daily paper.</h1>
+    <p>Pick a newspaper and an edition date. News Hunter reads every article and every advertisement, including procurement notices, and groups what matters for medical equipment, consumables and services.</p>
     <div class="hero-tags" aria-label="Service features">
-      <span>Original article images</span>
-      <span>No summaries</span>
-      <span>Two trusted publications</span>
+      <span>Tender notices read from adverts</span>
+      <span>Exact page links</span>
+      <span>Custom-size image downloads</span>
     </div>
   </div>
-  <div class="hero-visual" aria-hidden="true">
-    <svg viewBox="0 0 560 420" role="img">
-      <rect class="paper-back" x="152" y="70" width="280" height="280" rx="8" transform="rotate(7 292 210)"/>
-      <rect class="paper" x="118" y="52" width="280" height="290" rx="8"/>
-      <rect class="paper-photo" x="145" y="84" width="104" height="90" rx="4"/>
-      <path class="paper-line" d="M273 92h92M273 116h92M273 140h62M145 204h220M145 229h220M145 254h174M145 286h126"/>
-      <circle class="lens" cx="375" cy="284" r="70"/>
-      <path class="handle" d="m425 334 64 64"/>
-      <path class="pulse" d="M165 129h19l10-22 16 45 13-23h27"/>
-    </svg>
-  </div>
 </section>
+{% endif %}
 
-<section class="panel monitor-controls" aria-labelledby="check-heading">
-  <div class="control-intro">
-    <p class="eyebrow">CHECK A NEWSPAPER EDITION</p>
-    <h2 id="check-heading">Choose your newspaper</h2>
-    <p>Choose a publication and optionally select an edition date. Leave the date blank to find the latest available issue.</p>
+<section class="panel finder" aria-labelledby="finder-heading"
+  data-publication="{{ selected_publication.key }}"
+  data-selected-date="{{ selected_date }}"
+  data-today="{{ today }}"
+  data-max-date="{{ max_date }}">
+  <h2 id="finder-heading" class="visually-hidden">Choose an edition</h2>
+  <div class="finder-left">
+    <p class="eyebrow">1 · NEWSPAPER</p>
+    <div class="paper-tabs" role="tablist" aria-label="Newspaper">
+      {% for publication in publications %}
+      <a role="tab" href="/monitor?publication={{ publication.key }}" data-publication-key="{{ publication.key }}"
+        aria-selected="{{ 'true' if publication.key == selected_publication.key else 'false' }}"
+        class="paper-tab{% if publication.key == selected_publication.key %} active{% endif %}">
+        <strong>{{ publication.name }}</strong>
+        <span>{% if publication.key == 'sunday-observer' %}Sundays{% else %}Monday to Saturday{% endif %}</span>
+      </a>
+      {% endfor %}
+    </div>
+    <p class="eyebrow">2 · EDITION DATE</p>
+    <div id="calendar" class="calendar" data-testid="calendar" aria-live="polite">
+      <p class="calendar-loading">Loading the edition calendar…</p>
+    </div>
+    <ul class="calendar-legend" aria-label="Calendar legend">
+      <li><span class="legend-dot available"></span>Edition published</li>
+      <li><span class="legend-dot checked"></span>Already checked</li>
+      <li><span class="legend-dot none"></span>No edition</li>
+    </ul>
   </div>
-  <form method="post" action="/monitor/check" class="check-form" data-testid="check-form">
-    <label for="publication">Newspaper
-      <select id="publication" name="publication" data-testid="publication-select" required>
-        {% for publication in publications %}
-        <option value="{{ publication.key }}"{% if publication.key == selected_publication.key %} selected{% endif %}>{{ publication.name }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label for="edition-date">Edition date <span class="muted">(optional)</span>
-      <input id="edition-date" name="edition_date" type="date" value="{{ selected_date }}" max="{{ today }}" data-testid="edition-date">
-    </label>
-    <button class="primary check-now" type="submit" data-testid="check-now">Check now <span aria-hidden="true">→</span></button>
-  </form>
-  <p id="check-progress" class="progress-message" hidden>Checking the selected edition and retrieving article images. The publisher’s image server may take a few minutes.</p>
-  <div class="schedule-note"><span class="status-dot" aria-hidden="true"></span><strong>Manual newspaper check</strong><span>Checks run when you click Check now.{% if not is_vercel %} Optional daily scheduling can be installed on Windows.{% endif %}</span></div>
+
+  <div class="finder-right">
+    <p class="eyebrow">3 · CHECK</p>
+    <form method="post" action="/monitor/check" class="check-form" id="check-form" data-testid="check-form">
+      <input type="hidden" name="publication" value="{{ selected_publication.key }}">
+      <label for="edition-date">Edition date
+        <input id="edition-date" name="edition_date" type="date" value="{{ selected_date }}" max="{{ max_date }}" data-testid="edition-date">
+      </label>
+      <p id="date-status" class="date-status" aria-live="polite">{% if not selected_date %}Leave the date empty to check the latest edition.{% endif %}</p>
+      <label class="check inline-check"><input type="checkbox" name="force" value="1"> Re-check even if a saved result exists</label>
+      <div class="check-actions">
+        <button class="primary check-now" type="submit" data-testid="check-now">Check now <span aria-hidden="true">→</span></button>
+        <button class="secondary" type="submit" id="check-latest" data-testid="check-latest">Latest edition</button>
+      </div>
+    </form>
+    <div id="check-progress" class="check-progress" hidden>
+      <div class="progress-head"><strong id="progress-title">Checking…</strong><span id="progress-time">0s</span></div>
+      <div class="progress-track" role="progressbar" aria-label="Check progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="progress-bar"></span></div>
+      <ol class="progress-steps" id="progress-steps">
+        <li data-stage="connect">Connect</li>
+        <li data-stage="pages">Page layouts</li>
+        <li data-stage="articles">Articles</li>
+        <li data-stage="adverts">Adverts</li>
+        <li data-stage="download">Images</li>
+        <li data-stage="ocr">Read adverts</li>
+        <li data-stage="classify">Categorise</li>
+      </ol>
+      <p id="progress-message" class="progress-text">Starting…</p>
+      <p class="progress-hint">The first check of an edition downloads every advertisement so tender notices can be read, which can take a few minutes. Saved results open instantly.</p>
+    </div>
+    <ul class="engine-status" aria-label="Screening status">
+      <li class="{{ 'ok' if ocr_available else 'warn' }}">{% if ocr_available %}Advert reading (Windows OCR) is on{% else %}Advert reading is off: Windows OCR is not available on this server, so tender notices cannot be read{% endif %}</li>
+      <li class="{{ 'ok' if ai_configured else 'info' }}">{% if ai_configured %}AI double-check is on{% else %}AI double-check is off (no API key); keyword rules are used and every item is marked for review{% endif %}</li>
+    </ul>
+  </div>
 </section>
 
 {% if error %}
 <div class="notice danger" role="alert">{{ error }}</div>
 {% endif %}
 
-{% if edition_date %}
-{% if matching_method %}
-<div class="notice{% if matching_warning %} danger{% endif %}" role="status">
-  <strong>Matching:</strong> {{ matching_method }}{% if matching_model %} (model: {{ matching_model }}){% endif %}{% if matching_warning %} — {{ matching_warning }}{% endif %}
-</div>
-{% endif %}
+{% if manifest %}
+{% if manifest.matching_warning %}<div class="notice" role="status"><strong>Screening:</strong> {{ manifest.matching_method }} · {{ manifest.matching_warning }}</div>{% endif %}
+{% for warning in manifest.warnings %}<div class="notice danger" role="alert">{{ warning }}</div>{% endfor %}
+
 <section class="results-heading" data-testid="results-heading">
   <div>
-    <p class="eyebrow">NEWSPAPER EDITION</p>
+    <p class="eyebrow">RESULTS</p>
     <h2>{{ selected_publication.name }} · {{ edition_date }}</h2>
+    <p class="muted results-meta">{{ manifest.stats.pages }} pages · {{ manifest.stats.articles }} articles and {{ manifest.stats.adverts_read }} adverts screened · checked {{ manifest.generated_at[:16].replace('T', ' ') }}</p>
   </div>
-  <span class="result-count">{{ articles | length }} article{% if articles | length != 1 %}s{% endif %}</span>
+  <span class="result-count">{{ articles | length }} item{% if articles | length != 1 %}s{% endif %}</span>
 </section>
 
+<div class="category-tiles" role="group" aria-label="Filter by category" data-testid="category-tiles">
+  {% for category in categories %}
+  {% set count = manifest.category_counts.get(category.key, 0) %}
+  <button type="button" class="category-tile cat-{{ category.key }}{% if category.key in hidden_categories %}{% else %} on{% endif %}"
+    data-category="{{ category.key }}" aria-pressed="{{ 'false' if category.key in hidden_categories else 'true' }}" title="{{ category.description }}">
+    <span class="tile-count">{{ count }}</span>
+    <span class="tile-label">{{ category.label }}</span>
+  </button>
+  {% endfor %}
+</div>
+
+<div class="results-toolbar" id="results-toolbar" data-testid="results-toolbar">
+  <input type="search" id="result-search" placeholder="Search titles, institutions and text" aria-label="Search results">
+  <label class="check inline-check"><input type="checkbox" id="review-only"> Needs review only</label>
+  <div class="toolbar-group">
+    <button type="button" class="secondary small" id="select-visible">Select shown</button>
+    <button type="button" class="secondary small" id="select-none">Clear</button>
+    <span id="selected-count" class="selected-count">0 selected</span>
+  </div>
+  <div class="toolbar-group">
+    <label class="inline-field">Size
+      <select id="bulk-size">
+        <option value="0">Original</option>
+        <option value="2400">Large · 2400 px wide</option>
+        <option value="1600" selected>Medium · 1600 px wide</option>
+        <option value="1000">Small · 1000 px wide</option>
+        <option value="700">Email · 700 px wide</option>
+      </select>
+    </label>
+    <label class="inline-field">Format
+      <select id="bulk-format">
+        <option value="jpeg" selected>JPG</option>
+        <option value="png">PNG</option>
+      </select>
+    </label>
+  </div>
+  <div class="toolbar-group download-buttons">
+    <button type="button" class="primary small" id="download-zip" disabled>Images (ZIP)</button>
+    <button type="button" class="secondary small" id="download-pdf" disabled>PDF</button>
+    <button type="button" class="secondary small" id="download-csv" disabled>List (CSV)</button>
+  </div>
+  <p id="toolbar-status" class="toolbar-status" aria-live="polite"></p>
+</div>
+
 {% if articles %}
-<div class="monitor-results" data-testid="monitor-results">
+<div class="result-grid" data-testid="monitor-results">
   {% for article in articles %}
-  <article class="monitor-article">
-    <div class="article-heading">
-      <div>
-        <p class="page-label">PAGE {{ article.page_number }}</p>
-        <h3>{{ article.title }}</h3>
-        <p class="match-detail">
-          {% if not article.match_source %}<span class="review-badge">Legacy unverified result</span>{% elif article.review_required %}<span class="review-badge">Human review required</span>{% else %}<span class="ai-badge">AI-confirmed candidate</span>{% endif %}
-          {{ article.match_reason }}
-        </p>
-      </div>
-      <a class="source-link" href="{{ article.source_url }}" target="_blank" rel="noopener">Open in e-paper <span aria-hidden="true">↗</span></a>
+  <article class="result-card cat-{{ article.primary_category }}" id="item-{{ article.uid }}"
+    data-uid="{{ article.uid }}"
+    data-categories="{{ article.categories | join(' ') }}"
+    data-review="{{ '1' if article.review_required else '0' }}"
+    data-search="{{ (article.title ~ ' ' ~ article.institutions | join(' ') ~ ' ' ~ article.text) | lower }}"
+    {% if article.primary_category in hidden_categories and article.categories | length == 1 %}hidden{% endif %}>
+    <div class="thumb-wrap">
+      <label class="select-box"><input type="checkbox" class="item-select" value="{{ article.uid }}" aria-label="Select {{ article.title }}"><span>Select</span></label>
+      {% if article.thumb_web_url %}
+      <button type="button" class="thumb-button" data-action="edit" aria-label="Adjust size and download: {{ article.title }}">
+        <img class="article-thumb" src="{{ article.thumb_web_url }}" alt="Newspaper image: {{ article.title }}" loading="lazy">
+      </button>
+      {% else %}
+      <p class="notice danger thumb-missing">Image unavailable. Open the page in the e-paper.</p>
+      {% endif %}
     </div>
-    {% if article.image_file %}
-    <a href="{{ article.image_web_url }}" target="_blank" aria-label="Open full-size image for {{ article.title }}">
-      <img class="article-screenshot" src="{{ article.image_web_url }}" alt="Original newspaper image: {{ article.title }}" loading="lazy">
-    </a>
-    {% else %}
-    <p class="notice danger">Article image unavailable. Review the original newspaper using Open in e-paper.</p>
-    {% endif %}
+    <div class="card-body">
+      <div class="chip-row">
+        {% for key in article.categories %}<span class="chip cat-{{ key }}{% if loop.first %} primary-chip{% endif %}">{{ categories_by_key[key].label }}</span>{% endfor %}
+        {% if article.borderline %}<span class="chip possible">Possible – verify</span>{% endif %}
+      </div>
+      <p class="page-label">PAGE {{ article.page_number }} · {% if article.kind == 'advert' %}ADVERT / NOTICE{% else %}NEWS ARTICLE{% endif %}</p>
+      <h3>{{ article.title }}</h3>
+      {% if article.institutions %}<p class="fact"><strong>Institution:</strong> {{ article.institutions | join(' · ') }}</p>{% endif %}
+      {% if article.dates_mentioned %}<p class="fact"><strong>Dates in text (verify):</strong> {{ article.dates_mentioned | join(' · ') }}</p>{% endif %}
+      {% if article.excerpt %}<p class="excerpt">{{ article.excerpt }}</p>{% endif %}
+      <details class="why">
+        <summary>{% if article.review_required %}<span class="review-badge">Needs review</span>{% else %}<span class="ai-badge">AI-confirmed</span>{% endif %} Why this was selected</summary>
+        <p>{{ article.match_reason }}</p>
+        {% for note in article.notes %}<p class="muted">{{ note }}</p>{% endfor %}
+        {% if article.signals %}<p class="muted">Signals: {{ article.signals | join(', ') }}</p>{% endif %}
+      </details>
+      <div class="card-buttons">
+        {% if article.image_web_url %}
+        <button type="button" class="primary small" data-action="edit">Adjust &amp; download</button>
+        <button type="button" class="secondary small" data-action="quick">Quick JPG</button>
+        {% endif %}
+        <a class="source-link" href="{{ article.source_url }}" target="_blank" rel="noopener">Open in e-paper <span aria-hidden="true">↗</span></a>
+      </div>
+    </div>
   </article>
   {% endfor %}
 </div>
+<p id="no-visible" class="empty-state" hidden>No items match the selected categories or search.</p>
 {% else %}
 <div class="empty-state" data-testid="empty-results">
-  <h3>No matching articles found</h3>
-  <p>The latest edition was checked, but no article met the medical-services criteria.</p>
+  <div class="empty-icon" aria-hidden="true">✓</div>
+  <h3>No medical items or tenders found in this edition</h3>
+  <p>Check the notices above for any part of the paper that could not be screened.</p>
 </div>
 {% endif %}
+
+{% if manifest.unscreened %}
+<details class="panel unscreened" data-testid="unscreened">
+  <summary><strong>{{ manifest.unscreened | length }} part{% if manifest.unscreened | length != 1 %}s{% endif %} of the paper could not be text-screened</strong> · review these images by eye</summary>
+  <div class="unscreened-grid">
+    {% for item in manifest.unscreened %}
+    <a class="unscreened-item" href="{{ item.source_url }}" target="_blank" rel="noopener">
+      {% if item.thumb_web_url %}<img src="{{ item.thumb_web_url }}" alt="Unscreened image on page {{ item.page_number }}" loading="lazy">{% endif %}
+      <span>Page {{ item.page_number }} · {{ item.reason }}</span>
+    </a>
+    {% endfor %}
+  </div>
+</details>
+{% endif %}
+
+<script type="application/json" id="edition-data">{{ {
+  "publication": selected_publication.key,
+  "publication_name": selected_publication.name,
+  "edition_date": edition_date,
+  "items": js_items
+} | tojson }}</script>
+
+{% elif edition_date %}
+<div class="empty-state" data-testid="not-checked">
+  <div class="empty-icon" aria-hidden="true">?</div>
+  <h3>{{ selected_publication.name }} · {{ edition_date }} has not been checked yet</h3>
+  <p>Choose Check now to read this edition.</p>
+</div>
 {% else %}
-<div class="empty-state welcome-state">
-  <div class="empty-icon" aria-hidden="true">⌕</div>
-  <h2>Your results will appear here</h2>
-  <p>Choose Daily News or Sunday Observer, then select <strong>Check now</strong>.</p>
-</div>
+<section class="how-it-works" aria-label="How it works">
+  <div><span>1</span><h3>Pick the paper and date</h3><p>The calendar only offers dates on which that newspaper was actually published, including tomorrow's paper once the publisher uploads it.</p></div>
+  <div><span>2</span><h3>Check the edition</h3><p>Every article is screened and every advertisement is read, so tender and procurement notices from hospitals, the Ministry of Health, the MSD and the SPC are found.</p></div>
+  <div><span>3</span><h3>Filter and download</h3><p>Filter by category, crop and resize each clipping, then download single images, a ZIP, one PDF or a CSV list for your sales team.</p></div>
+</section>
 {% endif %}
+
+<dialog id="editor" class="editor" aria-labelledby="editor-title">
+  <form method="dialog" class="editor-shell">
+    <header class="editor-header">
+      <div>
+        <p class="eyebrow">ADJUST CLIPPING</p>
+        <h2 id="editor-title">Clipping</h2>
+      </div>
+      <button type="submit" class="secondary small" value="close" aria-label="Close editor">Close ✕</button>
+    </header>
+    <div class="editor-body">
+      <div class="crop-stage" id="crop-stage">
+        <canvas id="editor-canvas"></canvas>
+        <div class="crop-box" id="crop-box" tabindex="0" aria-label="Crop area. Drag to move, drag the corners to resize, or use the arrow keys.">
+          <span class="handle" data-handle="nw"></span><span class="handle" data-handle="n"></span><span class="handle" data-handle="ne"></span>
+          <span class="handle" data-handle="w"></span><span class="handle" data-handle="e"></span>
+          <span class="handle" data-handle="sw"></span><span class="handle" data-handle="s"></span><span class="handle" data-handle="se"></span>
+        </div>
+        <p class="editor-loading" id="editor-loading">Loading full-resolution image…</p>
+      </div>
+      <div class="editor-controls">
+        <fieldset>
+          <legend>Crop</legend>
+          <div class="button-row">
+            <button type="button" class="secondary small" id="crop-trim">Trim white margins</button>
+            <button type="button" class="secondary small" id="crop-reset">Reset</button>
+          </div>
+          <p class="muted small-text">Drag the green frame or its corners on the image.</p>
+        </fieldset>
+        <fieldset>
+          <legend>Output size</legend>
+          <label>Width
+            <select id="edit-size">
+              <option value="0">Original (crop size)</option>
+              <option value="2400">Large · 2400 px</option>
+              <option value="1600">Medium · 1600 px</option>
+              <option value="1000">Small · 1000 px</option>
+              <option value="700">Email · 700 px</option>
+              <option value="custom">Custom…</option>
+            </select>
+          </label>
+          <label id="custom-width-label" hidden>Custom width (px)
+            <input type="number" id="edit-custom" min="200" max="6000" step="50" value="1200">
+          </label>
+          <label>Format
+            <select id="edit-format">
+              <option value="jpeg">JPG</option>
+              <option value="png">PNG</option>
+            </select>
+          </label>
+          <label id="quality-label">JPG quality <output id="quality-value">88</output>
+            <input type="range" id="edit-quality" min="55" max="98" value="88">
+          </label>
+        </fieldset>
+        <p class="output-info" id="output-info" aria-live="polite">–</p>
+        <div class="button-row stacked">
+          <button type="button" class="primary" id="edit-download">Download this clipping</button>
+          <button type="button" class="secondary" id="edit-save">Use these settings in bulk downloads</button>
+        </div>
+        <p class="muted small-text">The original newspaper image is unchanged. Settings are remembered in this browser for this edition.</p>
+      </div>
+    </div>
+  </form>
+</dialog>
 {% endblock %}
-{% block scripts %}<script src="/static/monitor.js" defer></script>{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', path='/monitor.js') }}" defer></script>
+{% endblock %}

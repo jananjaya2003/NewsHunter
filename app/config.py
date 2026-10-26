@@ -39,10 +39,19 @@ class Settings:
     max_chunk_chars: int = int(os.getenv("MAX_CHUNK_CHARS", "45000"))
     max_stories_per_chunk: int = int(os.getenv("MAX_STORIES_PER_CHUNK", "50"))
     ai_request_timeout_seconds: float = float(os.getenv("AI_REQUEST_TIMEOUT_SECONDS", "30"))
-    monitor_ai_workers: int = max(1, min(4, int(os.getenv("MONITOR_AI_WORKERS", "3"))))
+    monitor_ai_workers: int = max(1, min(4, int(os.getenv("MONITOR_AI_WORKERS", "4"))))
     monitor_gemini_model: str = os.getenv("MONITOR_GEMINI_MODEL", "gemini-3.5-flash-lite").strip()
-    monitor_ai_budget_seconds: float = float(os.getenv("MONITOR_AI_BUDGET_SECONDS", "150"))
-    monitor_timeout_seconds: float = float(os.getenv("MONITOR_TIMEOUT_SECONDS", "220"))
+    monitor_ai_budget_seconds: float = float(
+        os.getenv("MONITOR_AI_BUDGET_SECONDS", "150" if IS_VERCEL else "480")
+    )
+    # Tender notices read by OCR are long, so one AI batch can take a while.
+    monitor_ai_timeout_seconds: float = float(os.getenv("MONITOR_AI_TIMEOUT_SECONDS", "90"))
+    # Checks run in the background locally, so they may take longer than a
+    # single serverless request allows.
+    monitor_timeout_seconds: float = float(
+        os.getenv("MONITOR_TIMEOUT_SECONDS", "250" if IS_VERCEL else "900")
+    )
+    monitor_ocr_workers: int = max(1, min(6, int(os.getenv("MONITOR_OCR_WORKERS", "3"))))
     database_path: Path = Path(os.getenv("DATABASE_PATH", str(RUNTIME_ROOT / "data/news_agent.db")))
     upload_dir: Path = Path(os.getenv("UPLOAD_DIR", str(RUNTIME_ROOT / "data/uploads")))
 

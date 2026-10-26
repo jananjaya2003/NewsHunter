@@ -1,5 +1,7 @@
+import json
+import time
 from dataclasses import replace
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -9,6 +11,54 @@ from app.epaper_monitor import COLOMBO
 from app.main import app
 
 client = TestClient(app)
+
+SAVED_MANIFEST = {
+    "cache_schema_version": 2,
+    "publication": "Daily News",
+    "publication_key": "daily-news",
+    "edition_date": "2026-10-15",
+    "generated_at": "2026-10-15T20:00:00+05:30",
+    "complete": True,
+    "article_count": 1,
+    "category_counts": {"facility": 1},
+    "matching_method": "Local medical keyword rules",
+    "matching_model": "",
+    "matching_warning": "",
+    "warnings": [],
+    "stats": {"pages": 12, "articles": 40, "adverts_read": 30},
+    "pages": [],
+    "unscreened": [],
+    "articles": [{
+        "uid": "story-12",
+        "kind": "story",
+        "story_id": 12,
+        "page_id": 3,
+        "page_number": "3",
+        "title": "Hospital expands emergency care",
+        "excerpt": "The Teaching Hospital Karapitiya opened a new unit.",
+        "text": "The Teaching Hospital Karapitiya opened a new unit.",
+        "image_url": "",
+        "source_url": "https://epaperst.lakehouse.lk/home/ArticleView?eid=1",
+        "categories": ["facility"],
+        "primary_category": "facility",
+        "priority": 70,
+        "strength": 2,
+        "is_tender": False,
+        "borderline": False,
+        "signals": ["hospital"],
+        "institutions": ["Teaching Hospital Karapitiya"],
+        "dates_mentioned": [],
+        "matched_terms": ["hospital"],
+        "match_source": "local-rules",
+        "match_reason": "Medical services reported.",
+        "match_confidence": 0.0,
+        "review_required": True,
+        "notes": [],
+        "rect": [0, 0, 0, 0],
+        "page_width": 0,
+        "page_height": 0,
+    }],
+}
 
 
 def test_monitor_page_lists_both_newspapers():
@@ -94,6 +144,29 @@ def test_failed_selected_date_check_preserves_date_for_retry(monkeypatch):
     assert response.status_code == 303
     assert "requested_date=2026-10-04" in response.headers["location"]
     assert "No%20edition%20was%20found" in response.headers["location"]
+    result_page = client.get(response.headers["location"])
+    assert result_page.status_code == 200
+    assert 'id="edition-date" name="edition_date" type="date" value="2026-10-04"' in result_page.text
+    assert "Check incomplete; human review required." in result_page.text
+
+
+def test_selected_date_displays_its_saved_article_results(monkeypatch, tmp_path):
+    report_dir = tmp_path / "daily-news" / "2026-10-15"
+    report_dir.mkdir(parents=True)
+    (report_dir / "manifest.json").write_text(json.dumps(SAVED_MANIFEST), encoding="utf-8")
+    monkeypatch.setattr(main_module, "MONITOR_REPORT_ROOT", tmp_path)
+
+    response = client.get(
+        "/monitor",
+        params={"publication": "daily-news", "edition_date": "2026-10-15"},
+    )
+
+    assert response.status_code == 200
+    assert "Daily News · 2026-10-15" in response.text
+    assert "Hospital expands emergency care" in response.text
+    assert "1 item" in response.text
+    assert "Hospitals &amp; medical centres" in response.text
+    assert "Institution:" in response.text
 
 
 def test_security_headers_are_present():
@@ -137,3 +210,101 @@ def test_authenticated_same_origin_post_is_allowed(monkeypatch):
         headers={"Origin": "http://testserver"},
     )
     assert response.status_code == 400
+
+
+def _wait_for_job(job_id):
+    for _ in range(200):
+        data = client.get(f"/api/jobs/{job_id}").json()
+        if data["status"] in {"done", "failed"}:
+            return data
+        time.sleep(0.02)
+    raise AssertionError("job did not finish")
+
+
+def test_background_check_reports_progress_and_result(monkeypatch):
+    def fake_generate_report_for_date(output_root, publication, issue_date, progress=None, force=False):
+        progress("ocr", 3, 10, "Reading text from advert 3 of 10")
+        return Path(output_root) / "manifest.json", issue_date
+
+    monkeypatch.setattr("app.main.generate_report_for_date", fake_generate_report_for_date)
+    response = client.post(
+        "/api/check", data={"publication": "daily-news", "edition_date": "2026-10-15"}
+    )
+    assert response.status_code == 202
+    job = _wait_for_job(response.json()["id"])
+    assert job["status"] == "done"
+    assert job["result_url"] == "/monitor?publication=daily-news&edition_date=2026-10-15"
+
+
+def test_background_check_failure_is_visible(monkeypatch):
+    def failing(output_root, publication, issue_date, progress=None, force=False):
+        raise RuntimeError("No Daily News edition is published for Sunday 11 October 2026.")
+
+    monkeypatch.setattr("app.main.generate_report_for_date", failing)
+    response = client.post(
+        "/api/check", data={"publication": "daily-news", "edition_date": "2026-10-11"}
+    )
+    job = _wait_for_job(response.json()["id"])
+    assert job["status"] == "failed"
+    assert "No Daily News edition" in job["error"]
+
+
+def test_tomorrows_early_edition_can_be_requested(monkeypatch):
+    monkeypatch.setattr(main_module, "colombo_today", lambda: date(2026, 10, 25))
+    calls = []
+
+    def fake(output_root, publication, issue_date, progress=None, force=False):
+        calls.append(issue_date.date())
+        return Path(output_root) / "manifest.json", issue_date
+
+    monkeypatch.setattr("app.main.generate_report_for_date", fake)
+    tomorrow = client.post(
+        "/api/check", data={"publication": "daily-news", "edition_date": "2026-10-26"}
+    )
+    assert tomorrow.status_code == 202
+    _wait_for_job(tomorrow.json()["id"])
+    assert calls == [date(2026, 10, 26)]
+    later = client.post(
+        "/api/check", data={"publication": "daily-news", "edition_date": "2026-10-27"}
+    )
+    assert later.status_code == 400
+
+
+def test_availability_lists_publisher_dates_and_saved_results(monkeypatch, tmp_path):
+    report_dir = tmp_path / "daily-news" / "2026-10-15"
+    report_dir.mkdir(parents=True)
+    (report_dir / "manifest.json").write_text(json.dumps(SAVED_MANIFEST), encoding="utf-8")
+    monkeypatch.setattr(main_module, "MONITOR_REPORT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        main_module.availability,
+        "month",
+        lambda publication, year, month: [date(2026, 10, 14), date(2026, 10, 15)],
+    )
+    data = client.get(
+        "/api/availability", params={"publication": "daily-news", "month": "2026-10"}
+    ).json()
+    assert data["dates"] == ["2026-10-14", "2026-10-15"]
+    assert data["checked"] == {"2026-10-15": {"complete": True, "count": 1, "tenders": 0}}
+    bad = client.get("/api/availability", params={"publication": "daily-news", "month": "x"})
+    assert bad.status_code == 400
+
+
+def test_image_proxy_only_serves_items_from_a_saved_result(monkeypatch, tmp_path):
+    report_dir = tmp_path / "daily-news" / "2026-10-15"
+    report_dir.mkdir(parents=True)
+    (report_dir / "manifest.json").write_text(json.dumps(SAVED_MANIFEST), encoding="utf-8")
+    monkeypatch.setattr(main_module, "MONITOR_REPORT_ROOT", tmp_path)
+    assert client.get("/api/image/daily-news/2026-10-15/story-999").status_code == 404
+    # The saved item has no publisher image, so nothing is fetched.
+    assert client.get("/api/image/daily-news/2026-10-15/story-12").status_code == 404
+    assert client.get("/api/image/daily-news/2026-10-16/story-12").status_code == 404
+
+
+def test_edition_api_returns_machine_readable_results(monkeypatch, tmp_path):
+    report_dir = tmp_path / "daily-news" / "2026-10-15"
+    report_dir.mkdir(parents=True)
+    (report_dir / "manifest.json").write_text(json.dumps(SAVED_MANIFEST), encoding="utf-8")
+    monkeypatch.setattr(main_module, "MONITOR_REPORT_ROOT", tmp_path)
+    data = client.get("/api/editions/daily-news/2026-10-15").json()
+    assert data["articles"][0]["institutions"] == ["Teaching Hospital Karapitiya"]
+    assert client.get("/api/editions/daily-news/2026-10-14").status_code == 404

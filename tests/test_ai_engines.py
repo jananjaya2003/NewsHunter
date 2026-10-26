@@ -74,9 +74,12 @@ def test_gemini_uses_fallback_model_after_transient_primary_failure(monkeypatch)
             )
 
     class FakeClient:
-        def __init__(self, *, api_key):
+        def __init__(self, *, api_key, http_options=None):
             assert api_key == "test-key"
             self.models = FakeModels()
+
+        def close(self):
+            return None
 
     monkeypatch.setattr("google.genai.Client", FakeClient)
     engine = GeminiEngine("test-key", "primary-model", ("fallback-model",))
