@@ -21,8 +21,8 @@ def test_vercel_startup_uses_configured_writable_storage():
     assert result.returncode == 0, result.stderr
 
 
-def test_vercel_requires_non_default_admin_password():
-    env = {**os.environ, "VERCEL": "1", "ADMIN_PASSWORD": ""}
+def test_vercel_rejects_placeholder_admin_password():
+    env = {**os.environ, "VERCEL": "1", "ADMIN_PASSWORD": "change-this-before-deployment"}
     result = subprocess.run(
         [sys.executable, "-c", "from app.core.config import Settings; Settings().prepare_directories()"],
         env=env, capture_output=True, text=True, check=False,
@@ -47,18 +47,17 @@ def test_vercel_default_paths_are_in_temporary_storage():
     assert result.returncode == 0, result.stderr
 
 
-def test_vercel_without_password_explains_setup_and_stays_locked():
+def test_vercel_without_password_opens_site_without_login():
     env = {**os.environ, "VERCEL": "1", "ADMIN_PASSWORD": ""}
     for name in ("DATABASE_PATH", "UPLOAD_DIR", "REPORT_DIR"):
         env[name] = str(Path(tempfile.mkdtemp()) / name.lower())
     result = subprocess.run(
         [sys.executable, "-c", (
+            "import dotenv; dotenv.load_dotenv = lambda *a, **k: None; "
             "from app.main import app; from fastapi.testclient import TestClient; "
             "c=TestClient(app); "
-            "r=c.get('/health'); assert r.status_code == 503, r.status_code; "
-            "assert 'ADMIN_PASSWORD' in r.text, r.text; "
-            "assert c.get('/monitor').status_code == 503; "
-            "assert c.get('/monitor', auth=('admin', '')).status_code == 503"
+            "assert c.get('/health').status_code == 200; "
+            "assert c.get('/monitor').status_code == 200"
         )], env=env, capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr

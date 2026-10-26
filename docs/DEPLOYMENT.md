@@ -37,7 +37,8 @@ repository or deploy the app.
 
 1. Import the GitHub repository. Select its root and the FastAPI framework.
    Leave build and install command overrides empty.
-2. Set `ADMIN_PASSWORD` to a unique strong password. Configure `AI_PROVIDER`
+2. Optional: set `ADMIN_PASSWORD` to require the `admin` login; without it the
+   site is open to anyone with the URL. Configure `AI_PROVIDER`
    and its API key and model settings using `.env.example` as a reference.
 3. Omit `DATABASE_PATH`, `UPLOAD_DIR` and `REPORT_DIR`: their Vercel defaults
    use writable temporary storage. Do not copy the local paths.

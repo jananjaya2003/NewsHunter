@@ -61,9 +61,8 @@ class Settings:
     report_dir: Path = Path(os.getenv("REPORT_DIR", str(RUNTIME_ROOT / "reports/manual")))
 
     def prepare_directories(self) -> None:
-        if IS_VERCEL and (
-            not self.admin_password or self.admin_password == "change-this-before-deployment"
-        ):
+        # ADMIN_PASSWORD is optional: without it the site is open to anyone with the URL.
+        if self.admin_password == "change-this-before-deployment":
             raise RuntimeError("Set a unique ADMIN_PASSWORD in Vercel before deployment.")
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self.upload_dir.mkdir(parents=True, exist_ok=True)
