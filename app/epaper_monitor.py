@@ -1606,6 +1606,27 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     LOGGER.info("Result saved: %s", path.resolve())
     print(f"http://127.0.0.1:8000/monitor?publication={publication.key}&edition_date={checked}")
+    return _upload_for_online_site(Path(args.output), publication, checked)
+
+
+def _upload_for_online_site(output_root: Path, publication: Publication, checked: date) -> int:
+    """Share the result with the Vercel site, which cannot reach the publisher itself."""
+    from app import result_store  # result_store imports this module
+
+    if not result_store.enabled():
+        return 0
+    try:
+        summary = result_store.publish_edition(output_root, publication, checked)
+    except Exception:
+        LOGGER.exception("Upload to the online site failed; the local result is still saved")
+        return 3
+    LOGGER.info("Uploaded to the online site: %s", summary)
+    if summary["image_failures"]:
+        LOGGER.error(
+            "%d image(s) could not be uploaded; those items show only an e-paper link online",
+            len(summary["image_failures"]),
+        )
+        return 3
     return 0
 
 

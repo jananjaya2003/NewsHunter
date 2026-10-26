@@ -39,25 +39,34 @@
       <p class="calendar-loading">Loading the edition calendar…</p>
     </div>
     <ul class="calendar-legend" aria-label="Calendar legend">
+      {% if remote_results %}
+      <li><span class="legend-dot checked"></span>Checked by the office PC (click to open)</li>
+      <li><span class="legend-dot none"></span>Not checked yet</li>
+      {% else %}
       <li><span class="legend-dot available"></span>Edition published</li>
       <li><span class="legend-dot checked"></span>Already checked</li>
       <li><span class="legend-dot none"></span>No edition</li>
+      {% endif %}
     </ul>
   </div>
 
   <div class="finder-right">
-    <p class="eyebrow">3 · CHECK</p>
-    <form method="post" action="/monitor/check" class="check-form" id="check-form" data-testid="check-form">
+    <p class="eyebrow">3 · {{ 'OPEN' if remote_results else 'CHECK' }}</p>
+    <form method="post" action="/monitor/check" class="check-form" id="check-form" data-testid="check-form"{% if remote_results %} data-remote="1"{% endif %}>
       <input type="hidden" name="publication" value="{{ selected_publication.key }}">
       <label for="edition-date">Edition date
         <input id="edition-date" name="edition_date" type="date" value="{{ selected_date }}" max="{{ max_date }}" data-testid="edition-date">
       </label>
-      <p id="date-status" class="date-status" aria-live="polite">{% if not selected_date %}Leave the date empty to check the latest edition.{% endif %}</p>
+      <p id="date-status" class="date-status" aria-live="polite">{% if not selected_date %}{{ 'Pick a checked date in the calendar.' if remote_results else 'Leave the date empty to check the latest edition.' }}{% endif %}</p>
+      {% if remote_results %}
+      <p class="notice" data-testid="remote-note">Editions are checked each morning on the office PC, which can reach the newspaper's website and read tender adverts, then uploaded here. A date that is not marked has not been checked yet.</p>
+      {% else %}
       <label class="check inline-check"><input type="checkbox" name="force" value="1"> Re-check even if a saved result exists</label>
       <div class="check-actions">
         <button class="primary check-now" type="submit" data-testid="check-now">Check now <span aria-hidden="true">→</span></button>
         <button class="secondary" type="submit" id="check-latest" data-testid="check-latest">Latest edition</button>
       </div>
+      {% endif %}
     </form>
     <div id="check-progress" class="check-progress" hidden>
       <div class="progress-head"><strong id="progress-title">Checking…</strong><span id="progress-time">0s</span></div>
@@ -74,10 +83,12 @@
       <p id="progress-message" class="progress-text">Starting…</p>
       <p class="progress-hint">The first check of an edition downloads every advertisement so tender notices can be read, which can take a few minutes. Saved results open instantly.</p>
     </div>
+    {% if not remote_results %}
     <ul class="engine-status" aria-label="Screening status">
       <li class="{{ 'ok' if ocr_available else 'warn' }}">{% if ocr_available %}Advert reading (Windows OCR) is on{% else %}Advert reading is off: Windows OCR is not available on this server, so tender notices cannot be read{% endif %}</li>
       <li class="{{ 'ok' if ai_configured else 'info' }}">{% if ai_configured %}AI double-check is on{% else %}AI double-check is off (no API key); keyword rules are used and every item is marked for review{% endif %}</li>
     </ul>
+    {% endif %}
   </div>
 </section>
 

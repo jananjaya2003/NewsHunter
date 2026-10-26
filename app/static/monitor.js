@@ -66,17 +66,24 @@ function setupFinder() {
   let [viewYear, viewMonth] = start.split("-").map(Number);
   viewMonth -= 1;
   const monthCache = new Map();
+  // On the online site, results are uploaded by the office PC instead of checked here.
+  const remote = form.dataset.remote === "1";
 
   function describeSelection() {
     const value = dateInput.value;
     status.classList.remove("bad", "good");
     if (!value) {
-      status.textContent = "Leave the date empty to check the latest edition.";
+      status.textContent = remote ? "Pick a checked date in the calendar." : "Leave the date empty to check the latest edition.";
       return;
     }
     const data = monthCache.get(value.slice(0, 7));
     if (!data) { status.textContent = longDate(value); return; }
     const saved = data.checked[value];
+    if (remote && !saved) {
+      status.classList.add("bad");
+      status.textContent = `${longDate(value)} has not been checked by the office PC yet.`;
+      return;
+    }
     if (!data.dates.includes(value)) {
       status.classList.add("bad");
       const earlier = data.dates.filter((day) => day < value).pop();
@@ -139,7 +146,8 @@ function setupFinder() {
       const value = isoDate(viewYear, viewMonth, day);
       const saved = data.checked[value];
       if (!available.has(value)) {
-        grid.append(el("span", { class: "day none", title: value > maxDate ? "Not published yet" : "No edition", role: "gridcell" }, String(day)));
+        const title = remote ? "Not checked yet" : value > maxDate ? "Not published yet" : "No edition";
+        grid.append(el("span", { class: "day none", title, role: "gridcell" }, String(day)));
         continue;
       }
       const button = el("button", {
@@ -151,6 +159,10 @@ function setupFinder() {
       }, String(day));
       if (saved && saved.tenders) button.append(el("small", { class: "tender-dot", "aria-hidden": "true" }, String(saved.tenders)));
       button.addEventListener("click", () => {
+        if (remote && saved) {
+          window.location.assign(`/monitor?publication=${publication}&edition_date=${value}`);
+          return;
+        }
         dateInput.value = value;
         $$(".day.selected", grid).forEach((node) => { node.classList.remove("selected"); node.setAttribute("aria-pressed", "false"); });
         button.classList.add("selected");
@@ -193,6 +205,7 @@ function setupCheck(form) {
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (form.dataset.remote === "1") return;
     const latest = event.submitter && event.submitter.id === "check-latest";
     const body = new FormData(form);
     if (latest) body.set("edition_date", "");

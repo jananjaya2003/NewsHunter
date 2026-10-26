@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app import ad_ocr
+from app import ad_ocr, result_store
 from app.agent import NewspaperAgent
 from app.config import IS_VERCEL, settings
 from app.database import Database
@@ -46,6 +46,12 @@ database.initialize()
 agent = NewspaperAgent(settings, database)
 jobs = JobManager()
 availability = AvailabilityCache(MONITOR_REPORT_ROOT / "_cache" / "availability.json")
+# On Vercel the publisher refuses cloud servers, so results come from the office PC via Blob.
+REMOTE = result_store.RemoteResults(MONITOR_REPORT_ROOT) if result_store.remote_mode() else None
+REMOTE_CHECK_MESSAGE = (
+    "This online site cannot reach the newspaper's website, so checks run on the office PC "
+    "and are uploaded here. Choose a checked date in the calendar."
+)
 
 app = FastAPI(title="News Hunter", version="0.3.0")
 APP_ROOT = Path(__file__).resolve().parent
@@ -162,9 +168,24 @@ def _publication(key: str):
     return selected
 
 
+def _sync_manifest(publication, edition_date: date) -> str:
+    """Fetch the uploaded result on the Vercel site; returns an error message or ''."""
+    if REMOTE is None:
+        return ""
+    try:
+        REMOTE.ensure_manifest(publication, edition_date)
+    except result_store.StoreError as exc:
+        LOGGER.warning("Saved result download failed: %s", exc)
+        return f"The saved result could not be loaded ({exc}). Try again shortly."
+    return ""
+
+
 def _manifest_item(publication_key: str, edition_date: str, uid: str) -> dict:
     publication = _publication(publication_key)
-    manifest = load_manifest(MONITOR_REPORT_ROOT, publication, _parse_edition_date(edition_date))
+    parsed = _parse_edition_date(edition_date)
+    if problem := _sync_manifest(publication, parsed):
+        raise HTTPException(502, problem)
+    manifest = load_manifest(MONITOR_REPORT_ROOT, publication, parsed)
     if manifest is None:
         raise HTTPException(404, "This edition has not been checked yet.")
     for item in manifest.get("articles", []):
@@ -183,7 +204,18 @@ def edition_image(publication: str, edition_date: str, uid: str, w: int = 0, dow
     source_url = item.get("image_url") or ""
     if not source_url:
         raise HTTPException(404, "Article image unavailable; use the source link.")
-    path = _cached_image(source_url)
+    if REMOTE is not None:
+        try:
+            remote_path = REMOTE.ensure_image(
+                _publication(publication), _parse_edition_date(edition_date), source_url
+            )
+        except result_store.StoreError as exc:
+            raise HTTPException(502, "Saved image could not be loaded; use the source link.") from exc
+        if remote_path is None:
+            raise HTTPException(404, "The office PC did not upload this image; use the source link.")
+        path = remote_path
+    else:
+        path = _cached_image(source_url)
     if w:
         if w not in THUMBNAIL_WIDTHS:
             raise HTTPException(400, "Unsupported thumbnail width.")
@@ -316,6 +348,7 @@ def monitor_home(
         except HTTPException:
             edition_date = ""
         else:
+            error = error or _sync_manifest(selected, parsed)
             manifest = load_manifest(MONITOR_REPORT_ROOT, selected, parsed)
             if manifest:
                 manifest = _web_manifest(selected.key, manifest)
@@ -337,6 +370,7 @@ def monitor_home(
             "hidden_categories": DEFAULT_HIDDEN_CATEGORIES,
             "error": error,
             "is_vercel": IS_VERCEL,
+            "remote_results": REMOTE is not None,
             "ocr_available": ad_ocr.ocr_available(),
             "ai_configured": settings.ai_configured,
         },
@@ -347,6 +381,11 @@ def monitor_home(
 def monitor_check(publication: str = Form(...), edition_date: str = Form("")):
     """Form fallback for browsers without JavaScript: checks synchronously."""
     selected = _publication(publication)
+    if REMOTE is not None:
+        return RedirectResponse(
+            f"/monitor?publication={selected.key}&error={quote(REMOTE_CHECK_MESSAGE)}",
+            status_code=303,
+        )
     issue_date = None
     if edition_date:
         parsed_date = _parse_edition_date(edition_date)
@@ -372,6 +411,8 @@ def monitor_check(publication: str = Form(...), edition_date: str = Form("")):
 @app.post("/api/check")
 def api_check(publication: str = Form(...), edition_date: str = Form(""), force: str = Form("")):
     selected = _publication(publication)
+    if REMOTE is not None:
+        raise HTTPException(409, REMOTE_CHECK_MESSAGE)
     parsed = _parse_edition_date(edition_date) if edition_date else None
     refresh = force in {"1", "true", "on"}
 
@@ -414,6 +455,32 @@ def _publisher_failure(exc: Exception) -> str:
     return type(exc).__name__
 
 
+def _saved_month(publication, year: int, month: int) -> dict:
+    """Calendar for the Vercel site: only dates the office PC has uploaded."""
+    try:
+        editions = REMOTE.editions(publication)
+    except result_store.StoreError as exc:
+        LOGGER.warning("Saved-results index unavailable: %s", exc)
+        raise HTTPException(502, "The saved results could not be loaded. Try again shortly.") from exc
+    prefix = f"{year:04d}-{month:02d}-"
+    dates = sorted(value for value in editions if value.startswith(prefix))
+    return {
+        "publication": publication.key,
+        "month": prefix[:-1],
+        "mode": "saved",
+        "dates": dates,
+        "checked": {
+            value: {
+                "complete": bool(editions[value].get("complete")),
+                "count": editions[value].get("count", 0),
+                "tenders": editions[value].get("tenders", 0),
+            }
+            for value in dates
+        },
+        "today": colombo_today().isoformat(),
+    }
+
+
 @app.get("/api/availability")
 def api_availability(publication: str, month: str):
     selected = _publication(publication)
@@ -424,6 +491,8 @@ def api_availability(publication: str, month: str):
         raise HTTPException(400, "Month must look like 2026-10.") from exc
     if first < date(2015, 1, 1) or first > colombo_today() + timedelta(days=32):
         raise HTTPException(400, "Month is outside the supported range.")
+    if REMOTE is not None:
+        return _saved_month(selected, year, month_number)
     try:
         dates = availability.month(selected, year, month_number)
     except (requests.RequestException, RuntimeError, ValueError) as exc:

@@ -18,8 +18,11 @@ try {
     foreach ($name in $Publication) {
         # Checks the latest edition; a saved complete result is reused, not re-downloaded.
         $output = & $pythonPath -m app.epaper_monitor --publication $name --log "data\epaper-monitor-$name.log"
+        # Exit code 3: the check worked but uploading to the online site did not.
         if ($LASTEXITCODE -ne 0) {
             $failed += $name
+        }
+        if ($LASTEXITCODE -notin 0, 3) {
             continue
         }
         $resultUrls += $output | Where-Object { $_ -like 'http*' } | Select-Object -Last 1
@@ -38,7 +41,7 @@ try {
         }
     }
     if ($failed) {
-        throw "The e-paper check failed for: $($failed -join ', '). See data\epaper-monitor-<name>.log."
+        throw "The e-paper check or its upload failed for: $($failed -join ', '). See data\epaper-monitor-<name>.log."
     }
 }
 finally {
