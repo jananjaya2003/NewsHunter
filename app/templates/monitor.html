@@ -85,7 +85,7 @@
     </div>
     {% if not remote_results %}
     <ul class="engine-status" aria-label="Screening status">
-      <li class="{{ 'ok' if ocr_available else 'warn' }}">{% if ocr_available %}Advert reading (Windows OCR) is on{% else %}Advert reading is off: Windows OCR is not available on this server, so tender notices cannot be read{% endif %}</li>
+      <li class="{{ 'ok' if ocr_available else 'warn' }}">{% if ocr_available %}Advert reading ({{ ocr_engine or 'OCR' }}) is on{% else %}Advert reading is off: no OCR engine is available on this server (Windows OCR is missing and no Gemini API key is set), so tender notices cannot be read{% endif %}</li>
       <li class="{{ 'ok' if ai_configured else 'info' }}">{% if ai_configured %}AI double-check is on{% else %}AI double-check is off (no API key); keyword rules are used and every item is marked for review{% endif %}</li>
     </ul>
     {% endif %}

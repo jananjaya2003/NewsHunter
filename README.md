@@ -24,7 +24,7 @@ NewsHunter/
 │   ├── core/                 Settings, SQLite database, data models, background jobs
 │   ├── ai/                   Gemini/OpenAI clients and the PDF summarisation agent
 │   ├── medical/              Medical scope rules and tender classification
-│   ├── extraction/           PDF text extraction and Windows OCR of page images
+│   ├── extraction/           PDF text extraction; advert OCR (Windows, or Gemini on Vercel)
 │   ├── monitor/              Daily e-paper monitor and Vercel Blob result store
 │   ├── templates/            Jinja2 HTML templates
 │   └── static/               CSS, JavaScript and icons

@@ -32,7 +32,7 @@ try {
         $listener = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
         if (-not $listener) {
             Start-Process -FilePath (Get-Command powershell.exe).Source -WindowStyle Hidden -ArgumentList @(
-                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'run_web_app.ps1')
+                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $PSScriptRoot 'run_web_app.ps1')`""
             )
             Start-Sleep -Seconds 8
         }

@@ -210,8 +210,9 @@ concise source-grounded reason.
 STORY_PHOTO_OVERLAP = 0.85
 OCR_MIN_TEXT_CHARS = 25
 AD_OCR_NOTE = (
-    "Text was read by OCR from the advertisement image and may contain recognition "
-    "errors; verify names, dates and quantities against the image."
+    "Text was read by OCR (Windows OCR, or Gemini AI on the online server) from the "
+    "advertisement image and may contain recognition errors or omissions; verify "
+    "names, dates and quantities against the image."
 )
 
 
@@ -1150,7 +1151,8 @@ def _read_adverts(
     if to_download and not ocr_ready:
         warning = (
             f"{len(to_download)} advertisement/notice image(s) could not be text-screened "
-            "because Windows OCR is not available on this server. Tender notices may be "
+            "because no OCR engine is available on this server (Windows OCR is not "
+            "available and no Gemini API key is set). Tender notices may be "
             "among them; review the 'Not screened' list."
         )
     elif to_download:

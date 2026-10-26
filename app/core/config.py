@@ -52,6 +52,9 @@ class Settings:
         os.getenv("MONITOR_TIMEOUT_SECONDS", "250" if IS_VERCEL else "900")
     )
     monitor_ocr_workers: int = max(1, min(6, int(os.getenv("MONITOR_OCR_WORKERS", "3"))))
+    # Used for advert OCR where Windows OCR is unavailable (the Vercel server).
+    ai_ocr_enabled: bool = _as_bool(os.getenv("AI_OCR_ENABLED"), True)
+    ocr_gemini_model: str = os.getenv("OCR_GEMINI_MODEL", "gemini-3.5-flash").strip()
     database_path: Path = Path(os.getenv("DATABASE_PATH", str(RUNTIME_ROOT / "data/news_agent.db")))
     upload_dir: Path = Path(os.getenv("UPLOAD_DIR", str(RUNTIME_ROOT / "data/uploads")))
 

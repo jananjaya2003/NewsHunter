@@ -373,6 +373,9 @@ def monitor_home(
             "is_vercel": IS_VERCEL,
             "remote_results": REMOTE is not None,
             "ocr_available": ad_ocr.ocr_available(),
+            "ocr_engine": {"windows": "Windows OCR", "gemini": "Gemini AI"}.get(
+                ad_ocr.ocr_engine() or "", ""
+            ),
             "ai_configured": settings.ai_configured,
         },
     )

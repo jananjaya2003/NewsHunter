@@ -67,7 +67,7 @@ class GeminiEngine(AIEngine):
         self,
         *,
         instructions: str,
-        content: str,
+        content: str | list,  # a list may mix text and image parts
         response_model: type[StructuredResult],
     ) -> StructuredResult:
         if not self.api_key:
