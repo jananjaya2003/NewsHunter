@@ -186,11 +186,11 @@ def test_results_offer_category_choice_viewer_and_full_text(monkeypatch, tmp_pat
                  'data-testid="view-article"', 'data-testid="viewer"', 'id="unviewed-only"',
                  'class="viewed-badge"', 'id="bulk-stamp"', 'id="edit-stamp"'):
         assert hook in page
-    # The viewer shows the saved text verbatim, with a warning to verify it.
+    # The viewer shows a summary instead of the full machine-read text.
     data = page.split('id="edition-data">', 1)[1].split("</script>", 1)[0]
     item = json.loads(data)["items"][0]
-    assert item["text"] == SAVED_MANIFEST["articles"][0]["text"]
-    assert "Machine-read text can contain errors" in page
+    assert "text" not in item and item["excerpt"]
+    assert 'data-testid="viewer-summary"' in page
     # Versioned script URL, so browsers load a changed script instead of a cached one.
     assert re.search(r'monitor\.js\?v=[0-9a-f]{12}"', page)
 

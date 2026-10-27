@@ -279,15 +279,16 @@
       <aside class="viewer-details">
         <label class="check inline-check"><input type="checkbox" id="viewer-zoom"> Actual size (scroll to read)</label>
         <div id="viewer-facts"></div>
-        <details class="why" open>
+        <div class="viewer-summary" data-testid="viewer-summary">
+          <p class="eyebrow">SUMMARY</p>
+          <p id="viewer-summary-text"></p>
+          <ul id="viewer-points" class="viewer-points"></ul>
+          <p id="viewer-summary-note" class="muted viewer-warning"></p>
+        </div>
+        <details class="why">
           <summary>Why this was selected</summary>
           <p id="viewer-reason"></p>
         </details>
-        <div>
-          <p class="eyebrow">TEXT AS READ FROM THE PAGE</p>
-          <p class="muted viewer-warning">Machine-read text can contain errors. Check names, dates, quantities and deadlines against the image or the e-paper.</p>
-          <p id="viewer-text" class="viewer-text"></p>
-        </div>
         <div class="button-row stacked">
           <a id="viewer-source" class="source-link" href="#" target="_blank" rel="noopener">Open in e-paper <span aria-hidden="true">↗</span></a>
           <button type="button" class="secondary small" id="viewer-edit">Adjust &amp; download</button>

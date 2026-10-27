@@ -484,7 +484,10 @@ button.small { min-height: 38px; padding: .45rem .8rem; font-size: .8rem; }
 .viewer-image img { max-width: 100%; height: auto; background: white; box-shadow: 0 8px 30px rgb(0 0 0 / 35%); }
 .viewer-image.actual img { max-width: none; }
 .viewer-details { display: grid; align-content: start; gap: .9rem; min-height: 0; overflow: auto; padding: 1.1rem; border-left: 1px solid var(--line); }
-.viewer-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .86rem; line-height: 1.5; }
+.viewer-summary p, .viewer-points { margin: 0 0 .5rem; font-size: .9rem; line-height: 1.5; }
+.viewer-points { padding-left: 1.1rem; }
+.viewer-points li { margin-bottom: .25rem; }
+.viewer-summary.loading #viewer-summary-text { color: var(--muted); }
 .viewer-warning { margin: .2rem 0 .5rem; font-size: .76rem; }
 @media (max-width: 860px) {
   .viewer-body { grid-template-columns: 1fr; overflow: auto; }

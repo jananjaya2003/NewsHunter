@@ -498,8 +498,7 @@ function setupViewer(results, editor) {
     facts.push(fact("Review", item.review_required ? "Needs human review" : "AI-confirmed (still verify before acting)"));
     $("#viewer-facts").replaceChildren(...facts);
     $("#viewer-reason").textContent = item.match_reason || "No reason recorded.";
-    const text = item.text || item.excerpt || "";
-    $("#viewer-text").textContent = text || "No machine-readable text was saved for this item; read it from the image or the e-paper.";
+    loadSummary(uid);
     $("#viewer-source").href = item.source_url || "#";
     $("#viewer-edit").hidden = !item.image_web_url;
     if (item.image_web_url) {
@@ -520,6 +519,37 @@ function setupViewer(results, editor) {
     $("#viewer-next").disabled = position < 0 || position >= order.length - 1;
     setViewed(uid, true);
     if (!dialog.open) dialog.showModal();
+  }
+
+  // Summaries are fetched only for the article on screen, after a short pause, so
+  // paging quickly through articles does not use up the AI's per-minute limit.
+  const summaryCache = new Map();
+  let summaryTimer = 0;
+  function renderSummary(data) {
+    $("#viewer-summary-text").textContent = data.summary;
+    $("#viewer-points").replaceChildren(...(data.key_points || []).map((point) => el("li", {}, point)));
+    $("#viewer-summary-note").textContent = data.note || "";
+    $(".viewer-summary").classList.remove("loading");
+  }
+  function loadSummary(uid) {
+    window.clearTimeout(summaryTimer);
+    if (summaryCache.has(uid)) { renderSummary(summaryCache.get(uid)); return; }
+    $(".viewer-summary").classList.add("loading");
+    $("#viewer-summary-text").textContent = "Writing a short summary…";
+    $("#viewer-points").replaceChildren();
+    $("#viewer-summary-note").textContent = "";
+    summaryTimer = window.setTimeout(async () => {
+      const { edition } = results;
+      try {
+        const response = await fetch(`/api/summary/${edition.publication}/${edition.edition_date}/${encodeURIComponent(uid)}`, { credentials: "same-origin" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (data.source === "ai") summaryCache.set(uid, data);
+        if (current === uid) renderSummary(data);
+      } catch (error) {
+        if (current === uid) renderSummary({ summary: "Summary unavailable. Read the image or open the e-paper.", key_points: [], note: `(${error.message})` });
+      }
+    }, 500);
   }
 
   function step(offset) {

@@ -24,7 +24,7 @@ from app.core.jobs import JobManager
 from app.core.schemas import Category
 from app.extraction import ad_ocr
 from app.medical.opportunities import CATEGORIES, DEFAULT_HIDDEN_CATEGORIES
-from app.monitor import result_store
+from app.monitor import result_store, summaries
 from app.monitor.epaper_monitor import (
     COLOMBO,
     DEFAULT_PUBLICATION,
@@ -36,6 +36,7 @@ from app.monitor.epaper_monitor import (
     generate_report_for_date,
     image_cache_path,
     load_manifest,
+    manifest_path,
     run_edition_check,
 )
 
@@ -315,6 +316,16 @@ def edition_image(
     return Response(path.read_bytes(), media_type="image/jpeg", headers=headers)
 
 
+@app.get("/api/summary/{publication}/{edition_date}/{uid}")
+def article_summary(publication: str, edition_date: str, uid: str):
+    """Short summary for the article viewer (cached; never adds facts)."""
+    item = _manifest_item(publication, edition_date, uid)
+    return summaries.summarise(
+        item,
+        manifest_path(MONITOR_REPORT_ROOT, _publication(publication), _parse_edition_date(edition_date)),
+    )
+
+
 def _unauthorized() -> Response:
     return Response(
         status_code=401,
@@ -428,7 +439,7 @@ def _js_item(item: dict) -> dict:
         "uid", "kind", "page_number", "title", "categories", "primary_category", "institutions",
         "dates_mentioned", "review_required", "match_reason", "source_url", "image_web_url",
         "view_web_url",
-        "borderline", "text", "excerpt",
+        "borderline", "excerpt",
     )
     return {key: item.get(key) for key in keys}
 
