@@ -147,6 +147,7 @@
         <option value="700">Email · 700 px wide</option>
       </select>
     </label>
+    <label class="check inline-check"><input type="checkbox" id="bulk-stamp" checked data-testid="bulk-stamp"> Date on images</label>
     <label class="inline-field">Format
       <select id="bulk-format">
         <option value="jpeg" selected>JPG</option>
@@ -339,6 +340,7 @@
           <label id="custom-width-label" hidden>Custom width (px)
             <input type="number" id="edit-custom" min="200" max="6000" step="50" value="1200">
           </label>
+          <label class="check inline-check"><input type="checkbox" id="edit-stamp" checked> Add newspaper, date and page below the image</label>
           <label>Format
             <select id="edit-format">
               <option value="jpeg">JPG</option>
@@ -361,5 +363,5 @@
 </dialog>
 {% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', path='/monitor.js') }}" defer></script>
+<script src="{{ url_for('static', path='/monitor.js') }}?v={{ static_version }}" defer></script>
 {% endblock %}

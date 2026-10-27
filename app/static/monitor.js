@@ -568,13 +568,30 @@ function renderClip(image, settings) {
   const targetWidth = settings.width && settings.width < crop.w * 4 ? settings.width : Math.round(crop.w);
   const scale = targetWidth / crop.w;
   const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(crop.w * scale));
-  canvas.height = Math.max(1, Math.round(crop.h * scale));
+  const clipWidth = Math.max(1, Math.round(crop.w * scale));
+  const clipHeight = Math.max(1, Math.round(crop.h * scale));
+  // The date label sits in a strip below the clipping so it never hides its text.
+  const fontSize = Math.max(13, Math.round(clipWidth * 0.018));
+  const strip = settings.stamp ? Math.round(fontSize * 1.9) : 0;
+  canvas.width = clipWidth;
+  canvas.height = clipHeight + strip;
   const context = canvas.getContext("2d");
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.imageSmoothingQuality = "high";
-  context.drawImage(image, crop.x, crop.y, crop.w, crop.h, 0, 0, canvas.width, canvas.height);
+  context.drawImage(image, crop.x, crop.y, crop.w, crop.h, 0, 0, clipWidth, clipHeight);
+  if (strip) {
+    context.fillStyle = "#d9ddd8";
+    context.fillRect(0, clipHeight, clipWidth, Math.max(1, Math.round(fontSize / 12)));
+    context.fillStyle = "#151a18";
+    context.font = `600 ${fontSize}px Arial, sans-serif`;
+    context.textAlign = "right";
+    context.textBaseline = "middle";
+    const padding = Math.round(fontSize * 0.7);
+    let text = settings.stamp;
+    while (text.length > 12 && context.measureText(text).width > clipWidth - padding * 2) text = `${text.slice(0, -2)}…`;
+    context.fillText(text, clipWidth - padding, clipHeight + strip / 2);
+  }
   return canvas;
 }
 
@@ -642,13 +659,31 @@ function setupEditor(results) {
   let crop = null;
   let displayScale = 1;
   let infoTimer = 0;
+  // One "date label" choice for every download, remembered in this browser.
+  const stampBoxes = ["#bulk-stamp", "#edit-stamp"].map((id) => $(id)).filter(Boolean);
+  let stampOn = storageGet("nh-stamp", true) !== false;
+  stampBoxes.forEach((box) => {
+    box.checked = stampOn;
+    box.addEventListener("change", () => {
+      stampOn = box.checked;
+      stampBoxes.forEach((other) => { other.checked = stampOn; });
+      storageSet("nh-stamp", stampOn);
+      if (dialog.open && image) scheduleInfo();
+    });
+  });
+  function stampFor(uid) {
+    const item = itemsByUid.get(uid);
+    if (!stampOn || !item) return "";
+    const page = item.page_number ? ` · Page ${item.page_number}` : "";
+    return `${edition.publication_name} · ${longDate(edition.edition_date)}${page}`;
+  }
 
   function chosenWidth() {
     if (size.value === "custom") return Math.max(200, Math.min(6000, Number(custom.value) || 1200));
     return Number(size.value);
   }
   function editorSettings() {
-    return { crop: { ...crop }, width: chosenWidth(), format: format.value, quality: Number(quality.value) };
+    return { crop: { ...crop }, width: chosenWidth(), format: format.value, quality: Number(quality.value), stamp: stampFor(current) };
   }
 
   function drawStage() {
@@ -814,7 +849,8 @@ function setupEditor(results) {
   }
 
   function bulkSettings(uid) {
-    return clipSettings[uid] || { crop: null, width: Number($("#bulk-size").value), format: $("#bulk-format").value, quality: 88 };
+    const saved = clipSettings[uid] || { crop: null, width: Number($("#bulk-size").value), format: $("#bulk-format").value, quality: 88 };
+    return { ...saved, stamp: stampFor(uid) };
   }
   for (const uid of Object.keys(clipSettings)) {
     const card = document.getElementById(`item-${uid}`);

@@ -82,6 +82,10 @@ app = FastAPI(title="News Hunter", version="0.3.0")
 APP_ROOT = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=APP_ROOT / "static"), name="static")
 templates = Jinja2Templates(directory=APP_ROOT / "templates")
+# Changes whenever a static file changes, so browsers never keep an old script.
+templates.env.globals["static_version"] = hashlib.sha256(
+    b"".join(path.read_bytes() for path in sorted((APP_ROOT / "static").glob("*.*")))
+).hexdigest()[:12]
 
 IMAGE_HOSTS = {"d1dtajqni3g43z.cloudfront.net", "dnsofs.avahan.net", "epaperst.lakehouse.lk"}
 MAX_IMAGE_BYTES = 16 * 1024 * 1024
