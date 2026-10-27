@@ -177,6 +177,47 @@ def _thumbnail(source: Path, width: int) -> Path:
     return destination
 
 
+def date_label(publication_name: str, edition_date: date, page_number: str = "") -> str:
+    """Label printed under every article image, e.g. 'Daily News · Monday, 26 October 2026 · Page 17'."""
+    label = f"{publication_name} · {edition_date:%A}, {edition_date.day} {edition_date:%B %Y}"
+    return f"{label} · Page {page_number}" if page_number else label
+
+
+def _stamped(source: Path, label: str) -> Path:
+    """Copy of the image with the label in a strip below it, so it never hides notice text."""
+    digest = hashlib.sha256(label.encode("utf-8")).hexdigest()[:10]
+    destination = source.parent.parent / "stamped" / f"{source.stem}-{digest}.jpg"
+    if destination.is_file():
+        return destination
+    content = source.read_bytes()
+    pixmap = pymupdf.Pixmap(content)
+    width, height = pixmap.width, pixmap.height
+    font_size = max(11, round(width * 0.024))
+    strip = round(font_size * 1.9)
+    padding = round(font_size * 0.7)
+    text = label
+    while len(text) > 12 and pymupdf.get_text_length(text, "hebo", font_size) > width - 2 * padding:
+        text = text[:-2] + "…"
+    document = pymupdf.open()
+    page = document.new_page(width=width, height=height + strip)
+    page.insert_image(pymupdf.Rect(0, 0, width, height), stream=content)
+    page.draw_line((0, height), (width, height), color=(0.85, 0.87, 0.85), width=max(1, font_size / 12))
+    text_width = pymupdf.get_text_length(text, "hebo", font_size)
+    page.insert_text(
+        (width - padding - text_width, height + strip / 2 + font_size * 0.35),
+        text, fontname="hebo", fontsize=font_size, color=(0.08, 0.1, 0.09),
+    )
+    output = page.get_pixmap(alpha=False).tobytes("jpg", jpg_quality=88)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{secrets.token_hex(5)}.part")
+    try:
+        temporary.write_bytes(output)
+        temporary.replace(destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return destination
+
+
 def _parse_edition_date(value: str) -> date:
     try:
         parsed = date.fromisoformat(value)
@@ -227,8 +268,14 @@ def _manifest_item(publication_key: str, edition_date: str, uid: str) -> dict:
 
 
 @app.get("/api/image/{publication}/{edition_date}/{uid}")
-def edition_image(publication: str, edition_date: str, uid: str, w: int = 0, download: int = 0):
-    """Same-origin image so the browser can crop and resize it on a canvas."""
+def edition_image(
+    publication: str, edition_date: str, uid: str, w: int = 0, download: int = 0, raw: int = 0
+):
+    """Same-origin article image, labelled with paper, date and page.
+
+    raw=1 returns the unlabelled image for the browser's crop/download tools,
+    which add the label themselves.
+    """
     item = _manifest_item(publication, edition_date, uid)
     source_url = item.get("image_url") or ""
     if not source_url:
@@ -252,6 +299,16 @@ def edition_image(publication: str, edition_date: str, uid: str, w: int = 0, dow
             path = _thumbnail(path, w)
         except (RuntimeError, ValueError) as exc:
             LOGGER.warning("Thumbnail failed for %s: %s", uid, exc)
+    if not raw:
+        selected = _publication(publication)
+        label = date_label(
+            selected.name, _parse_edition_date(edition_date), str(item.get("page_number") or "")
+        )
+        try:
+            path = _stamped(path, label)
+        except (RuntimeError, ValueError, OSError) as exc:
+            # Still show the image; the page and the file name carry the date.
+            LOGGER.warning("Date label failed for %s: %s", uid, exc)
     headers = {"Cache-Control": "private, max-age=86400"}
     if download:
         headers["Content-Disposition"] = f'attachment; filename="{publication}-{edition_date}-{uid}.jpg"'
@@ -350,7 +407,9 @@ def _web_manifest(publication_key: str, manifest: dict) -> dict:
     edition_date = manifest["edition_date"]
     for item in manifest.get("articles", []):
         base = f"/api/image/{publication_key}/{edition_date}/{item['uid']}"
-        item["image_web_url"] = base if item.get("image_url") else ""
+        # Unlabelled original for the crop/download tools; they add the label themselves.
+        item["image_web_url"] = f"{base}?raw=1" if item.get("image_url") else ""
+        item["view_web_url"] = base if item.get("image_url") else ""
         item["thumb_web_url"] = f"{base}?w=640" if item.get("image_url") else ""
     for item in manifest.get("unscreened", []):
         item["uid"] = f"unscreened-{item.get('object_id')}-{item.get('page_id')}"
@@ -368,6 +427,7 @@ def _js_item(item: dict) -> dict:
     keys = (
         "uid", "kind", "page_number", "title", "categories", "primary_category", "institutions",
         "dates_mentioned", "review_required", "match_reason", "source_url", "image_web_url",
+        "view_web_url",
         "borderline", "text", "excerpt",
     )
     return {key: item.get(key) for key in keys}

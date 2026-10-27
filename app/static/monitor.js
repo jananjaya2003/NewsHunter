@@ -445,6 +445,12 @@ function setupResults() {
     cards.forEach((card) => { if (!card.hidden) $(".item-select", card).checked = true; });
     updateSelection();
   });
+  // One click for a whole day: select every shown article, then build the dated ZIP.
+  $("#download-all-shown").addEventListener("click", () => {
+    $$(".item-select").forEach((box) => { box.checked = !box.closest(".result-card").hidden; });
+    updateSelection();
+    $("#download-zip").click();
+  });
   $("#select-none").addEventListener("click", () => { $$(".item-select").forEach((box) => { box.checked = false; }); updateSelection(); });
   applyFilters();
 
@@ -500,7 +506,7 @@ function setupViewer(results, editor) {
       noImage.hidden = true;
       image.hidden = false;
       image.alt = `Newspaper image: ${item.title}`;
-      image.src = item.image_web_url;
+      image.src = item.view_web_url || item.image_web_url;
     } else {
       image.hidden = true;
       image.removeAttribute("src");

@@ -5,6 +5,7 @@ from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
 
+import pymupdf
 import requests
 from fastapi.testclient import TestClient
 
@@ -335,6 +336,33 @@ def test_image_proxy_only_serves_items_from_a_saved_result(monkeypatch, tmp_path
     # The saved item has no publisher image, so nothing is fetched.
     assert client.get("/api/image/daily-news/2026-10-15/story-12").status_code == 404
     assert client.get("/api/image/daily-news/2026-10-16/story-12").status_code == 404
+
+
+def test_every_served_article_image_carries_the_edition_date(monkeypatch, tmp_path):
+    manifest = json.loads(json.dumps(SAVED_MANIFEST))
+    manifest["articles"][0]["image_url"] = "https://d1dtajqni3g43z.cloudfront.net/DNSO/a.jpg"
+    report_dir = tmp_path / "daily-news" / "2026-10-15"
+    report_dir.mkdir(parents=True)
+    (report_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(main_module, "MONITOR_REPORT_ROOT", tmp_path)
+    picture = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 900, 600), False)
+    picture.clear_with(255)
+    monkeypatch.setattr(main_module, "_download_publisher_image", lambda url: picture.tobytes("jpg"))
+    uid = manifest["articles"][0]["uid"]
+
+    raw = client.get(f"/api/image/daily-news/2026-10-15/{uid}?raw=1")
+    labelled = client.get(f"/api/image/daily-news/2026-10-15/{uid}")
+    thumb = client.get(f"/api/image/daily-news/2026-10-15/{uid}?w=640")
+
+    assert pymupdf.Pixmap(raw.content).height == 600
+    labelled_image = pymupdf.Pixmap(labelled.content)
+    assert labelled_image.width == 900 and labelled_image.height > 600
+    assert pymupdf.Pixmap(thumb.content).height > pymupdf.Pixmap(thumb.content).width * 600 / 900
+    # The label is drawn in the strip below the picture, not over it.
+    assert labelled_image.pixel(450, 300) == (255, 255, 255)
+    assert main_module.date_label("Daily News", date(2026, 10, 26), "17") == (
+        "Daily News · Monday, 26 October 2026 · Page 17"
+    )
 
 
 def test_edition_api_returns_machine_readable_results(monkeypatch, tmp_path):
