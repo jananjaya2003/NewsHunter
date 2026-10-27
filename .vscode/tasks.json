@@ -10,7 +10,7 @@
                 "-ExecutionPolicy",
                 "Bypass",
                 "-File",
-                "${workspaceFolder}\scripts\windows\run_web_app.ps1"
+                "${workspaceFolder}/scripts/windows/run_web_app.ps1"
             ],
             "isBackground": true,
             "problemMatcher": [],
@@ -19,14 +19,14 @@
         {
             "label": "Lint (ruff)",
             "type": "shell",
-            "command": "${workspaceFolder}\.venv\Scripts\python.exe",
+            "command": "${workspaceFolder}/.venv/Scripts/python.exe",
             "args": ["-m", "ruff", "check", "."],
             "problemMatcher": []
         },
         {
             "label": "Run tests",
             "type": "shell",
-            "command": "${workspaceFolder}\.venv\Scripts\python.exe",
+            "command": "${workspaceFolder}/.venv/Scripts/python.exe",
             "args": ["-m", "pytest", "-q"],
             "problemMatcher": [],
             "group": "test"
