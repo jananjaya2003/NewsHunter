@@ -170,6 +170,27 @@ def test_selected_date_displays_its_saved_article_results(monkeypatch, tmp_path)
     assert "Institution:" in response.text
 
 
+def test_results_offer_category_choice_viewer_and_full_text(monkeypatch, tmp_path):
+    report_dir = tmp_path / "daily-news" / "2026-10-15"
+    report_dir.mkdir(parents=True)
+    (report_dir / "manifest.json").write_text(json.dumps(SAVED_MANIFEST), encoding="utf-8")
+    monkeypatch.setattr(main_module, "MONITOR_REPORT_ROOT", tmp_path)
+
+    page = client.get(
+        "/monitor", params={"publication": "daily-news", "edition_date": "2026-10-15"}
+    ).text
+
+    for hook in ('id="categories-all"', 'id="categories-none"', 'class="tile-tick"',
+                 'data-testid="view-article"', 'data-testid="viewer"', 'id="unviewed-only"',
+                 'class="viewed-badge"'):
+        assert hook in page
+    # The viewer shows the saved text verbatim, with a warning to verify it.
+    data = page.split('id="edition-data">', 1)[1].split("</script>", 1)[0]
+    item = json.loads(data)["items"][0]
+    assert item["text"] == SAVED_MANIFEST["articles"][0]["text"]
+    assert "Machine-read text can contain errors" in page
+
+
 def test_security_headers_are_present():
     response = client.get("/health")
     assert response.headers["x-content-type-options"] == "nosniff"

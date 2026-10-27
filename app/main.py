@@ -364,7 +364,7 @@ def _js_item(item: dict) -> dict:
     keys = (
         "uid", "kind", "page_number", "title", "categories", "primary_category", "institutions",
         "dates_mentioned", "review_required", "match_reason", "source_url", "image_web_url",
-        "borderline",
+        "borderline", "text", "excerpt",
     )
     return {key: item.get(key) for key in keys}
 

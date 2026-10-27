@@ -106,14 +106,22 @@
     <h2>{{ selected_publication.name }} · {{ edition_date }}</h2>
     <p class="muted results-meta">{{ manifest.stats.pages }} pages · {{ manifest.stats.articles }} articles and {{ manifest.stats.adverts_read }} adverts screened · checked {{ manifest.generated_at[:16].replace('T', ' ') }}</p>
   </div>
-  <span class="result-count">{{ articles | length }} item{% if articles | length != 1 %}s{% endif %}</span>
+  <span class="result-count" id="result-count" data-total="{{ articles | length }}">{{ articles | length }} item{% if articles | length != 1 %}s{% endif %}</span>
 </section>
 
+<div class="category-bar">
+  <p class="category-hint">Click categories to choose which articles are shown. Ticked categories are shown.</p>
+  <div class="toolbar-group">
+    <button type="button" class="secondary small" id="categories-all" data-testid="categories-all">All categories</button>
+    <button type="button" class="secondary small" id="categories-none" data-testid="categories-none">None</button>
+  </div>
+</div>
 <div class="category-tiles" role="group" aria-label="Filter by category" data-testid="category-tiles">
   {% for category in categories %}
   {% set count = manifest.category_counts.get(category.key, 0) %}
   <button type="button" class="category-tile cat-{{ category.key }}{% if category.key in hidden_categories %}{% else %} on{% endif %}"
     data-category="{{ category.key }}" aria-pressed="{{ 'false' if category.key in hidden_categories else 'true' }}" title="{{ category.description }}">
+    <span class="tile-tick" aria-hidden="true"></span>
     <span class="tile-count">{{ count }}</span>
     <span class="tile-label">{{ category.label }}</span>
   </button>
@@ -123,6 +131,7 @@
 <div class="results-toolbar" id="results-toolbar" data-testid="results-toolbar">
   <input type="search" id="result-search" placeholder="Search titles, institutions and text" aria-label="Search results">
   <label class="check inline-check"><input type="checkbox" id="review-only"> Needs review only</label>
+  <label class="check inline-check"><input type="checkbox" id="unviewed-only" data-testid="unviewed-only"> Not viewed yet</label>
   <div class="toolbar-group">
     <button type="button" class="secondary small" id="select-visible">Select shown</button>
     <button type="button" class="secondary small" id="select-none">Clear</button>
@@ -165,7 +174,7 @@
     <div class="thumb-wrap">
       <label class="select-box"><input type="checkbox" class="item-select" value="{{ article.uid }}" aria-label="Select {{ article.title }}"><span>Select</span></label>
       {% if article.thumb_web_url %}
-      <button type="button" class="thumb-button" data-action="edit" aria-label="Adjust size and download: {{ article.title }}">
+      <button type="button" class="thumb-button" data-action="view" aria-label="View: {{ article.title }}">
         <img class="article-thumb" src="{{ article.thumb_web_url }}" alt="Newspaper image: {{ article.title }}" loading="lazy">
       </button>
       {% else %}
@@ -176,6 +185,7 @@
       <div class="chip-row">
         {% for key in article.categories %}<span class="chip cat-{{ key }}{% if loop.first %} primary-chip{% endif %}">{{ categories_by_key[key].label }}</span>{% endfor %}
         {% if article.borderline %}<span class="chip possible">Possible – verify</span>{% endif %}
+        <span class="viewed-badge" hidden>✓ Viewed</span>
       </div>
       <p class="page-label">PAGE {{ article.page_number }} · {% if article.kind == 'advert' %}ADVERT / NOTICE{% else %}NEWS ARTICLE{% endif %}</p>
       <h3>{{ article.title }}</h3>
@@ -189,8 +199,9 @@
         {% if article.signals %}<p class="muted">Signals: {{ article.signals | join(', ') }}</p>{% endif %}
       </details>
       <div class="card-buttons">
+        <button type="button" class="primary small" data-action="view" data-testid="view-article">View</button>
         {% if article.image_web_url %}
-        <button type="button" class="primary small" data-action="edit">Adjust &amp; download</button>
+        <button type="button" class="secondary small" data-action="edit">Adjust &amp; download</button>
         <button type="button" class="secondary small" data-action="quick">Quick JPG</button>
         {% endif %}
         <a class="source-link" href="{{ article.source_url }}" target="_blank" rel="noopener">Open in e-paper <span aria-hidden="true">↗</span></a>
@@ -199,7 +210,7 @@
   </article>
   {% endfor %}
 </div>
-<p id="no-visible" class="empty-state" hidden>No items match the selected categories or search.</p>
+<p id="no-visible" class="empty-state" hidden>No items match the selected categories, filters or search. Tick more categories above to see them.</p>
 {% else %}
 <div class="empty-state" data-testid="empty-results">
   <div class="empty-icon" aria-hidden="true">✓</div>
@@ -242,6 +253,48 @@
   <div><span>3</span><h3>Filter and download</h3><p>Filter by category, crop and resize each clipping, then download single images, a ZIP, one PDF or a CSV list for your sales team.</p></div>
 </section>
 {% endif %}
+
+<dialog id="viewer" class="editor viewer" aria-labelledby="viewer-title" data-testid="viewer">
+  <div class="editor-shell">
+    <header class="editor-header">
+      <div>
+        <p class="eyebrow" id="viewer-meta">ARTICLE</p>
+        <h2 id="viewer-title">Article</h2>
+        <div class="chip-row" id="viewer-chips"></div>
+      </div>
+      <div class="toolbar-group">
+        <span id="viewer-position" class="selected-count"></span>
+        <button type="button" class="secondary small" id="viewer-prev" aria-label="Previous article">‹ Previous</button>
+        <button type="button" class="secondary small" id="viewer-next" aria-label="Next article">Next ›</button>
+        <button type="button" class="secondary small" id="viewer-close" aria-label="Close viewer">Close ✕</button>
+      </div>
+    </header>
+    <div class="viewer-body">
+      <div class="viewer-image" id="viewer-image-wrap">
+        <img id="viewer-image" alt="">
+        <p id="viewer-no-image" class="notice danger" hidden>Image unavailable. Review this item in the e-paper.</p>
+      </div>
+      <aside class="viewer-details">
+        <label class="check inline-check"><input type="checkbox" id="viewer-zoom"> Actual size (scroll to read)</label>
+        <div id="viewer-facts"></div>
+        <details class="why" open>
+          <summary>Why this was selected</summary>
+          <p id="viewer-reason"></p>
+        </details>
+        <div>
+          <p class="eyebrow">TEXT AS READ FROM THE PAGE</p>
+          <p class="muted viewer-warning">Machine-read text can contain errors. Check names, dates, quantities and deadlines against the image or the e-paper.</p>
+          <p id="viewer-text" class="viewer-text"></p>
+        </div>
+        <div class="button-row stacked">
+          <a id="viewer-source" class="source-link" href="#" target="_blank" rel="noopener">Open in e-paper <span aria-hidden="true">↗</span></a>
+          <button type="button" class="secondary small" id="viewer-edit">Adjust &amp; download</button>
+          <button type="button" class="secondary small" id="viewer-unview">Mark as not viewed</button>
+        </div>
+      </aside>
+    </div>
+  </div>
+</dialog>
 
 <dialog id="editor" class="editor" aria-labelledby="editor-title">
   <form method="dialog" class="editor-shell">

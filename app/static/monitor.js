@@ -376,6 +376,23 @@ function setupResults() {
     });
   }
 
+  // "Viewed" ticks are remembered in this browser, per edition.
+  const viewedKey = `nh-viewed-${edition.publication}-${edition.edition_date}`;
+  const viewed = new Set(storageGet(viewedKey, []));
+  const unviewedOnly = $("#unviewed-only");
+  const resultCount = $("#result-count");
+
+  function setViewed(uid, on) {
+    if (on) viewed.add(uid); else viewed.delete(uid);
+    storageSet(viewedKey, Array.from(viewed));
+    const card = document.getElementById(`item-${uid}`);
+    if (card) {
+      card.classList.toggle("is-viewed", on);
+      $(".viewed-badge", card).hidden = !on;
+    }
+  }
+  cards.forEach((card) => setViewed(card.dataset.uid, viewed.has(card.dataset.uid)));
+
   function activeCategories() { return new Set(tiles.filter((tile) => tile.classList.contains("on")).map((tile) => tile.dataset.category)); }
 
   function applyFilters() {
@@ -386,13 +403,25 @@ function setupResults() {
       const categories = card.dataset.categories.split(" ");
       const visible = categories.some((key) => active.has(key))
         && (!reviewOnly.checked || card.dataset.review === "1")
+        && (!unviewedOnly.checked || !viewed.has(card.dataset.uid))
         && (!query || card.dataset.search.includes(query));
       card.hidden = !visible;
       if (visible) shown += 1;
     });
     if (noVisible) noVisible.hidden = shown > 0 || !cards.length;
+    const total = Number(resultCount.dataset.total);
+    resultCount.textContent = shown === total ? `${total} item${total === 1 ? "" : "s"}` : `Showing ${shown} of ${total}`;
     updateSelection();
   }
+
+  function setCategories(on) {
+    tiles.forEach((tile) => { tile.classList.toggle("on", on); tile.setAttribute("aria-pressed", on ? "true" : "false"); });
+    storageSet(filterKey, { on: Array.from(activeCategories()) });
+    applyFilters();
+  }
+  $("#categories-all").addEventListener("click", () => setCategories(true));
+  $("#categories-none").addEventListener("click", () => setCategories(false));
+  unviewedOnly.addEventListener("change", applyFilters);
 
   function selectedUids() { return $$(".item-select:checked").map((box) => box.value); }
   function updateSelection() {
@@ -425,7 +454,97 @@ function setupResults() {
     image.closest(".thumb-button").replaceWith(notice);
   }, { once: true }));
 
-  return { edition, itemsByUid, selectedUids };
+  return { edition, itemsByUid, selectedUids, cards, setViewed, applyFilters };
+}
+
+/* ---------- Article viewer ---------- */
+
+function setupViewer(results, editor) {
+  const dialog = $("#viewer");
+  if (!results || !dialog) return;
+  const { itemsByUid, cards, setViewed } = results;
+  const image = $("#viewer-image");
+  const imageWrap = $("#viewer-image-wrap");
+  const noImage = $("#viewer-no-image");
+  const zoom = $("#viewer-zoom");
+  let current = null;
+
+  // Previous/next follow the cards currently shown by the filters.
+  function shownUids() { return cards.filter((card) => !card.hidden).map((card) => card.dataset.uid); }
+
+  function fact(label, value) {
+    const line = el("p", { class: "fact" });
+    line.append(el("strong", {}, `${label}: `), value);
+    return line;
+  }
+
+  function show(uid) {
+    const item = itemsByUid.get(uid);
+    const card = document.getElementById(`item-${uid}`);
+    if (!item || !card) return;
+    current = uid;
+    $("#viewer-title").textContent = item.title || "Untitled item";
+    $("#viewer-meta").textContent = `PAGE ${item.page_number} · ${item.kind === "advert" ? "ADVERT / NOTICE" : "NEWS ARTICLE"}`;
+    $("#viewer-chips").replaceChildren(...$$(".chip-row .chip", card).map((chip) => chip.cloneNode(true)));
+    const facts = [];
+    if (item.institutions && item.institutions.length) facts.push(fact("Institution", item.institutions.join(" · ")));
+    if (item.dates_mentioned && item.dates_mentioned.length) facts.push(fact("Dates in text (verify)", item.dates_mentioned.join(" · ")));
+    facts.push(fact("Review", item.review_required ? "Needs human review" : "AI-confirmed (still verify before acting)"));
+    $("#viewer-facts").replaceChildren(...facts);
+    $("#viewer-reason").textContent = item.match_reason || "No reason recorded.";
+    const text = item.text || item.excerpt || "";
+    $("#viewer-text").textContent = text || "No machine-readable text was saved for this item; read it from the image or the e-paper.";
+    $("#viewer-source").href = item.source_url || "#";
+    $("#viewer-edit").hidden = !item.image_web_url;
+    if (item.image_web_url) {
+      noImage.hidden = true;
+      image.hidden = false;
+      image.alt = `Newspaper image: ${item.title}`;
+      image.src = item.image_web_url;
+    } else {
+      image.hidden = true;
+      image.removeAttribute("src");
+      noImage.hidden = false;
+    }
+    imageWrap.scrollTo(0, 0);
+    const order = shownUids();
+    const position = order.indexOf(uid);
+    $("#viewer-position").textContent = position >= 0 ? `${position + 1} of ${order.length}` : "";
+    $("#viewer-prev").disabled = position <= 0;
+    $("#viewer-next").disabled = position < 0 || position >= order.length - 1;
+    setViewed(uid, true);
+    if (!dialog.open) dialog.showModal();
+  }
+
+  function step(offset) {
+    const order = shownUids();
+    const next = order[order.indexOf(current) + offset];
+    if (next) show(next);
+  }
+
+  image.addEventListener("error", () => {
+    if (!image.getAttribute("src")) return;
+    image.hidden = true;
+    noImage.hidden = false;
+  });
+  zoom.addEventListener("change", () => imageWrap.classList.toggle("actual", zoom.checked));
+  $("#viewer-prev").addEventListener("click", () => step(-1));
+  $("#viewer-next").addEventListener("click", () => step(1));
+  $("#viewer-close").addEventListener("click", () => dialog.close());
+  $("#viewer-unview").addEventListener("click", () => { if (current) setViewed(current, false); dialog.close(); });
+  $("#viewer-edit").addEventListener("click", () => { dialog.close(); if (editor && current) editor.open(current); });
+  dialog.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowRight") step(1);
+    if (event.key === "ArrowLeft") step(-1);
+  });
+  // Re-apply "Not viewed yet" when the viewer closes, not while paging through it.
+  dialog.addEventListener("close", () => results.applyFilters());
+
+  document.addEventListener("click", (event) => {
+    const trigger = event.target.closest("[data-action='view']");
+    const card = trigger && trigger.closest(".result-card");
+    if (card) show(card.dataset.uid);
+  });
 }
 
 /* ---------- Image rendering ---------- */
@@ -701,7 +820,7 @@ function setupEditor(results) {
     const card = document.getElementById(`item-${uid}`);
     if (card) card.classList.add("has-settings");
   }
-  return { bulkSettings };
+  return { bulkSettings, open };
 }
 
 function clipFilename(edition, item, format) {
@@ -904,4 +1023,5 @@ document.addEventListener("DOMContentLoaded", () => {
   const results = setupResults();
   const editor = setupEditor(results);
   setupDownloads(results, editor);
+  setupViewer(results, editor);
 });
