@@ -40,8 +40,9 @@
     </div>
     <ul class="calendar-legend" aria-label="Calendar legend">
       {% if remote_results %}
-      <li><span class="legend-dot checked"></span>Checked by the office PC (click to open)</li>
-      <li><span class="legend-dot none"></span>Not checked yet</li>
+      <li><span class="legend-dot checked"></span>Checked (click to open)</li>
+      <li><span class="legend-dot requested"></span>Check requested</li>
+      <li><span class="legend-dot available"></span>Not checked yet (select, then Check now)</li>
       {% else %}
       <li><span class="legend-dot available"></span>Edition published</li>
       <li><span class="legend-dot checked"></span>Already checked</li>
@@ -51,21 +52,20 @@
   </div>
 
   <div class="finder-right">
-    <p class="eyebrow">3 · {{ 'OPEN' if remote_results else 'CHECK' }}</p>
+    <p class="eyebrow">3 · CHECK</p>
     <form method="post" action="/monitor/check" class="check-form" id="check-form" data-testid="check-form"{% if remote_results %} data-remote="1"{% endif %}>
       <input type="hidden" name="publication" value="{{ selected_publication.key }}">
       <label for="edition-date">Edition date
         <input id="edition-date" name="edition_date" type="date" value="{{ selected_date }}" max="{{ max_date }}" data-testid="edition-date">
       </label>
-      <p id="date-status" class="date-status" aria-live="polite">{% if not selected_date %}{{ 'Pick a checked date in the calendar.' if remote_results else 'Leave the date empty to check the latest edition.' }}{% endif %}</p>
-      {% if remote_results %}
-      <p class="notice" data-testid="remote-note">Editions are checked each morning on the office PC, which can reach the newspaper's website and read tender adverts, then uploaded here. A date that is not marked has not been checked yet.</p>
-      {% else %}
+      <p id="date-status" class="date-status" aria-live="polite">{% if not selected_date %}{{ 'Pick a date in the calendar, then press Check now.' if remote_results else 'Leave the date empty to check the latest edition.' }}{% endif %}</p>
       <label class="check inline-check"><input type="checkbox" name="force" value="1"> Re-check even if a saved result exists</label>
       <div class="check-actions">
         <button class="primary check-now" type="submit" data-testid="check-now">Check now <span aria-hidden="true">→</span></button>
-        <button class="secondary" type="submit" id="check-latest" data-testid="check-latest">Latest edition</button>
+        {% if not remote_results %}<button class="secondary" type="submit" id="check-latest" data-testid="check-latest">Latest edition</button>{% endif %}
       </div>
+      {% if remote_results %}
+      <p class="notice" data-testid="remote-note">Check now runs the check on this site when the newspaper's website allows it. While it refuses this online server, the date is marked &ldquo;Check requested&rdquo; and the office PC runs the check and uploads it here. The online site keeps results for the last 45 days.</p>
       {% endif %}
     </form>
     <div id="check-progress" class="check-progress" hidden>

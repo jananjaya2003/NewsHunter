@@ -45,6 +45,27 @@ repository or deploy the app.
 4. Deploy and verify `/health`, `/monitor`, `/static/styles.css` and `/admin`.
    The editor/checker username is `admin`.
 
+## Check now on the online site
+
+The publisher's website refuses Vercel's servers (HTTP 403), so the online
+site works from results stored in Vercel Blob. Every date from the last 45
+days can be selected. **Check now** first tries the check on Vercel. That
+works once the publisher allows this server. If it is refused, or the check
+cannot finish within the function time limit, the date is saved as a request
+and marked "Check requested" in the calendar.
+
+The office PC runs those requests and uploads the results:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.monitor.request_worker            # once
+.\.venv\Scripts\python.exe -m app.monitor.request_worker --watch 5  # every 5 minutes
+```
+
+Nothing runs automatically until you start or schedule the worker. A request
+that fails stays on the calendar with its reason (red), and **Check now**
+queues it again. Do not try to get around the publisher's block. Ask the
+publisher to allow the site instead.
+
 ## Production limitations
 
 This supports temporary previews. SQLite, uploads and reports can disappear

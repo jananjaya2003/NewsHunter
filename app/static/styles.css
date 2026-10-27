@@ -386,6 +386,8 @@ footer { margin-top: 5rem; color: #dbe9e2; background: var(--green-deep); }
 .day.available:hover { border-color: var(--green); background: var(--green-soft); }
 .day.checked { background: var(--green-soft); }
 .day.checked::after { position: absolute; right: 4px; bottom: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--green); content: ""; }
+.day.requested { border-style: dashed; border-color: #c98a1b; background: #fff6e0; color: #7a4d00; }
+.day.request-failed { border-color: #b3261e; background: #fdecea; color: #8c1d18; }
 .day.selected { border-color: var(--green-deep); background: var(--green-deep); color: white; }
 .day.selected::after { background: var(--lime); }
 .tender-dot {
@@ -397,6 +399,7 @@ footer { margin-top: 5rem; color: #dbe9e2; background: var(--green-deep); }
 .legend-dot { width: 12px; height: 12px; border: 1px solid #b9dccb; border-radius: 3px; background: white; }
 .legend-dot.checked { background: var(--green-soft); border-color: var(--green); }
 .legend-dot.none { border-color: var(--line); background: #f0f1ef; }
+.legend-dot.requested { border: 1px dashed #c98a1b; background: #fff6e0; }
 
 .finder .check-form { grid-template-columns: 1fr; gap: .8rem; }
 .date-status { min-height: 1.5em; margin: 0; color: var(--ink-soft); font-size: .88rem; }

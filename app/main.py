@@ -4,6 +4,7 @@ import hashlib
 import logging
 import secrets
 import threading
+import time
 from base64 import b64decode
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -29,11 +30,13 @@ from app.monitor.epaper_monitor import (
     DEFAULT_PUBLICATION,
     PUBLICATIONS,
     AvailabilityCache,
+    EpaperError,
     colombo_today,
     generate_latest_report,
     generate_report_for_date,
     image_cache_path,
     load_manifest,
+    run_edition_check,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -62,9 +65,18 @@ availability = AvailabilityCache(MONITOR_REPORT_ROOT / "_cache" / "availability.
 # On Vercel the publisher refuses cloud servers, so results come from the office PC via Blob.
 REMOTE = result_store.RemoteResults(MONITOR_REPORT_ROOT) if result_store.remote_mode() else None
 REMOTE_CHECK_MESSAGE = (
-    "This online site cannot reach the newspaper's website, so checks run on the office PC "
-    "and are uploaded here. Choose a checked date in the calendar."
+    "This online site cannot check the latest edition by itself. Pick a date in the "
+    "calendar and press Check now."
 )
+QUEUED_MESSAGE = (
+    "Check requested. The newspaper's website does not answer this online server{reason}, "
+    "so the office PC will run the check and upload it here. This date stays marked "
+    "\u201cCheck requested\u201d until then; the office PC must be on and running the "
+    "request worker."
+)
+# After a refused connection, skip direct attempts for a while (per server instance).
+BLOCK_RETRY_SECONDS = 600
+_publisher_blocked_until = 0.0
 
 app = FastAPI(title="News Hunter", version="0.3.0")
 APP_ROOT = Path(__file__).resolve().parent
@@ -410,8 +422,20 @@ def monitor_check(publication: str = Form(...), edition_date: str = Form("")):
     """Form fallback for browsers without JavaScript: checks synchronously."""
     selected = _publication(publication)
     if REMOTE is not None:
+        if not edition_date:
+            return RedirectResponse(
+                f"/monitor?publication={selected.key}&error={quote(REMOTE_CHECK_MESSAGE)}",
+                status_code=303,
+            )
+        try:
+            outcome = _online_check(selected, _parse_edition_date(edition_date), force=False)
+        except HTTPException as exc:
+            outcome = {"status": "failed", "message": str(exc.detail)}
+        if outcome["status"] == "done":
+            return RedirectResponse(outcome["result_url"], status_code=303)
         return RedirectResponse(
-            f"/monitor?publication={selected.key}&error={quote(REMOTE_CHECK_MESSAGE)}",
+            f"/monitor?publication={selected.key}&requested_date={edition_date}"
+            f"&error={quote(outcome['message'])}",
             status_code=303,
         )
     issue_date = None
@@ -439,10 +463,13 @@ def monitor_check(publication: str = Form(...), edition_date: str = Form("")):
 @app.post("/api/check")
 def api_check(publication: str = Form(...), edition_date: str = Form(""), force: str = Form("")):
     selected = _publication(publication)
-    if REMOTE is not None:
-        raise HTTPException(409, REMOTE_CHECK_MESSAGE)
     parsed = _parse_edition_date(edition_date) if edition_date else None
     refresh = force in {"1", "true", "on"}
+    if REMOTE is not None:
+        if parsed is None:
+            raise HTTPException(400, REMOTE_CHECK_MESSAGE)
+        outcome = _online_check(selected, parsed, force=refresh)
+        return JSONResponse(outcome, status_code=200 if outcome["status"] == "done" else 202)
 
     def runner(progress) -> str:
         try:
@@ -466,6 +493,87 @@ def api_check(publication: str = Form(...), edition_date: str = Form(""), force:
 
     job = jobs.submit(selected.key, edition_date or "latest", runner)
     return JSONResponse(job.to_dict(), status_code=202)
+
+
+def _result_url(publication, edition_date: date) -> str:
+    return f"/monitor?publication={publication.key}&edition_date={edition_date.isoformat()}"
+
+
+def _queue_check(publication, edition_date: date, force: bool, reason: str) -> dict:
+    try:
+        REMOTE.request_check(publication, edition_date, force=force, reason=reason)
+    except result_store.StoreError as exc:
+        LOGGER.error("Check request could not be saved: %s", exc)
+        raise HTTPException(
+            502,
+            f"The check could not run online ({reason}) and the request for the office PC "
+            "could not be saved either. Try again shortly; until then this edition is "
+            "unchecked and needs review in the e-paper.",
+        ) from exc
+    return {
+        "status": "queued",
+        "edition_date": edition_date.isoformat(),
+        "message": QUEUED_MESSAGE.format(reason=f" ({reason})" if reason else ""),
+    }
+
+
+def _publisher_failure_short(exc: Exception) -> str:
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        return f"HTTP {exc.response.status_code}"
+    if isinstance(exc, requests.Timeout):
+        return "no answer in time"
+    return "connection refused or dropped"
+
+
+def _online_check(publication, edition_date: date, force: bool) -> dict:
+    """Check now on the Vercel site.
+
+    Runs the check here when the publisher answers (for example once it allows
+    this server), and otherwise leaves a request for the office PC. Every path
+    either shows a result or keeps the date visibly marked for follow-up.
+    """
+    global _publisher_blocked_until
+    if edition_date < result_store.oldest_kept_date():
+        raise HTTPException(
+            400,
+            f"The online site keeps results for {result_store.KEEP_DAYS} days only. Check "
+            "older editions in the local app on the office PC.",
+        )
+    if not force:
+        _sync_manifest(publication, edition_date)
+        saved = load_manifest(MONITOR_REPORT_ROOT, publication, edition_date)
+        if saved and saved.get("complete"):
+            return {"status": "done", "result_url": _result_url(publication, edition_date)}
+    if time.monotonic() < _publisher_blocked_until:
+        return _queue_check(publication, edition_date, force, "it refused this server recently")
+    try:
+        run_edition_check(MONITOR_REPORT_ROOT, publication, edition_date, force=force)
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else 0
+        if status in {401, 403, 429}:
+            _publisher_blocked_until = time.monotonic() + BLOCK_RETRY_SECONDS
+        return _queue_check(publication, edition_date, force, _publisher_failure_short(exc))
+    except EpaperError as exc:
+        message = str(exc)
+        if message.startswith("No ") and "edition is published" in message:
+            # The publisher answered: there is no paper that day, so nothing to review.
+            raise HTTPException(404, message) from exc
+        return _queue_check(publication, edition_date, force, "the check did not finish here")
+    except requests.RequestException as exc:
+        return _queue_check(publication, edition_date, force, _publisher_failure_short(exc))
+    except Exception:
+        LOGGER.exception("Online check failed for %s %s", publication.name, edition_date)
+        return _queue_check(publication, edition_date, force, "the check failed here")
+    try:
+        summary = result_store.publish_edition(
+            MONITOR_REPORT_ROOT, publication, edition_date, backend=REMOTE.backend
+        )
+    except (result_store.StoreError, OSError, requests.RequestException) as exc:
+        LOGGER.error("Online check result could not be saved: %s", exc)
+        # The result lives on this server only; let the office PC make the lasting copy.
+        return _queue_check(publication, edition_date, True, "its result could not be saved")
+    REMOTE.remember(publication, edition_date, summary["index_entry"])
+    return {"status": "done", "result_url": _result_url(publication, edition_date)}
 
 
 @app.get("/api/jobs/{job_id}")
@@ -516,6 +624,11 @@ def _saved_month(publication, year: int, month: int) -> dict:
     except result_store.StoreError as exc:
         LOGGER.warning("Saved-results index unavailable: %s", exc)
         raise HTTPException(502, "The saved results could not be loaded. Try again shortly.") from exc
+    try:
+        requested = REMOTE.requests(publication)
+    except result_store.StoreError as exc:
+        LOGGER.warning("Check requests unavailable: %s", exc)
+        requested = {}
     prefix = f"{year:04d}-{month:02d}-"
     dates = sorted(value for value in editions if value.startswith(prefix))
     return {
@@ -523,6 +636,16 @@ def _saved_month(publication, year: int, month: int) -> dict:
         "month": prefix[:-1],
         "mode": "saved",
         "dates": dates,
+        "oldest": result_store.oldest_kept_date().isoformat(),
+        "requested": {
+            value: {
+                "status": entry.get("status", "queued"),
+                "requested_at": entry.get("requested_at", ""),
+                "error": entry.get("error", ""),
+            }
+            for value, entry in requested.items()
+            if value.startswith(prefix)
+        },
         "checked": {
             value: {
                 "complete": bool(editions[value].get("complete")),

@@ -47,9 +47,10 @@ class Settings:
     # Tender notices read by OCR are long, so one AI batch can take a while.
     monitor_ai_timeout_seconds: float = float(os.getenv("MONITOR_AI_TIMEOUT_SECONDS", "90"))
     # Checks run in the background locally, so they may take longer than a
-    # single serverless request allows.
+    # single serverless request allows (Vercel stops it at 300 s; the upload
+    # after the check needs some of that time).
     monitor_timeout_seconds: float = float(
-        os.getenv("MONITOR_TIMEOUT_SECONDS", "250" if IS_VERCEL else "900")
+        os.getenv("MONITOR_TIMEOUT_SECONDS", "200" if IS_VERCEL else "900")
     )
     monitor_ocr_workers: int = max(1, min(6, int(os.getenv("MONITOR_OCR_WORKERS", "3"))))
     # Used for advert OCR where Windows OCR is unavailable (the Vercel server).

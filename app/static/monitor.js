@@ -66,24 +66,60 @@ function setupFinder() {
   let [viewYear, viewMonth] = start.split("-").map(Number);
   viewMonth -= 1;
   const monthCache = new Map();
-  // On the online site, results are uploaded by the office PC instead of checked here.
+  // The online site cannot list the publisher's editions, so every recent date is
+  // selectable there; Check now runs online or leaves a request for the office PC.
   const remote = form.dataset.remote === "1";
+
+  function selectable(data, value) {
+    if (!remote) return data.dates.includes(value);
+    return value <= maxDate && (!data.oldest || value >= data.oldest);
+  }
+
+  function describeRemote(data, value) {
+    const saved = data.checked[value];
+    const request = (data.requested || {})[value];
+    if (!selectable(data, value)) {
+      status.classList.add("bad");
+      status.textContent = value > maxDate
+        ? `${longDate(value)} is not published yet.`
+        : `${longDate(value)} is older than the online site keeps; check it in the local app on the office PC.`;
+      return;
+    }
+    if (saved) {
+      status.classList.add("good");
+      status.textContent = `${longDate(value)} · saved result: `;
+      const link = el("a", { href: `/monitor?publication=${publication}&edition_date=${value}` },
+        `${saved.count} items, ${saved.tenders} medical tender${saved.tenders === 1 ? "" : "s"}`);
+      status.append(link, saved.complete ? "." : " (incomplete: some items still need review; press Check now to re-check).");
+      return;
+    }
+    if (request && request.status === "failed") {
+      status.classList.add("bad");
+      status.textContent = `${longDate(value)} · the requested check failed: ${request.error} This edition still needs review. Press Check now to try again.`;
+      return;
+    }
+    if (request) {
+      const when = request.requested_at ? ` at ${request.requested_at.slice(11, 16)} on ${longDate(request.requested_at.slice(0, 10))}` : "";
+      status.textContent = `${longDate(value)} · check requested${when}. Waiting for the office PC to run it and upload the result.`;
+      return;
+    }
+    status.textContent = `${longDate(value)} · not checked yet. Press Check now.`;
+    const weekday = new Date(`${value}T00:00:00Z`).getUTCDay();
+    if (publication === "daily-news" && weekday === 0) status.textContent += " (The Daily News is not usually published on Sundays.)";
+    if (publication === "sunday-observer" && weekday !== 0) status.textContent += " (The Sunday Observer is published on Sundays.)";
+  }
 
   function describeSelection() {
     const value = dateInput.value;
     status.classList.remove("bad", "good");
     if (!value) {
-      status.textContent = remote ? "Pick a checked date in the calendar." : "Leave the date empty to check the latest edition.";
+      status.textContent = remote ? "Pick a date in the calendar, then press Check now." : "Leave the date empty to check the latest edition.";
       return;
     }
     const data = monthCache.get(value.slice(0, 7));
     if (!data) { status.textContent = longDate(value); return; }
+    if (remote) { describeRemote(data, value); return; }
     const saved = data.checked[value];
-    if (remote && !saved) {
-      status.classList.add("bad");
-      status.textContent = `${longDate(value)} has not been checked by the office PC yet.`;
-      return;
-    }
     if (!data.dates.includes(value)) {
       status.classList.add("bad");
       const earlier = data.dates.filter((day) => day < value).pop();
@@ -141,20 +177,24 @@ function setupFinder() {
     const firstWeekday = (new Date(Date.UTC(viewYear, viewMonth, 1)).getUTCDay() + 6) % 7;
     for (let blank = 0; blank < firstWeekday; blank += 1) grid.append(el("span", { class: "day blank" }));
     const daysInMonth = new Date(Date.UTC(viewYear, viewMonth + 1, 0)).getUTCDate();
-    const available = new Set(data.dates);
     for (let day = 1; day <= daysInMonth; day += 1) {
       const value = isoDate(viewYear, viewMonth, day);
       const saved = data.checked[value];
-      if (!available.has(value)) {
-        const title = remote ? "Not checked yet" : value > maxDate ? "Not published yet" : "No edition";
+      const request = !saved && (data.requested || {})[value];
+      if (!selectable(data, value)) {
+        const title = value > maxDate ? "Not published yet" : remote ? "Older than the online site keeps" : "No edition";
         grid.append(el("span", { class: "day none", title, role: "gridcell" }, String(day)));
         continue;
       }
+      const state = saved ? " checked" : request ? (request.status === "failed" ? " request-failed" : " requested") : "";
+      const spoken = saved ? `, already checked, ${saved.count} items`
+        : request ? (request.status === "failed" ? ", requested check failed" : ", check requested")
+        : remote ? ", not checked yet" : ", edition available";
       const button = el("button", {
         type: "button",
-        class: `day available${saved ? " checked" : ""}${value === dateInput.value ? " selected" : ""}`,
+        class: `day available${state}${value === dateInput.value ? " selected" : ""}`,
         "data-date": value,
-        "aria-label": `${longDate(value)}${saved ? `, already checked, ${saved.count} items` : ", edition available"}`,
+        "aria-label": `${longDate(value)}${spoken}`,
         "aria-pressed": value === dateInput.value ? "true" : "false",
       }, String(day));
       if (saved && saved.tenders) button.append(el("small", { class: "tender-dot", "aria-hidden": "true" }, String(saved.tenders)));
@@ -191,10 +231,10 @@ function setupFinder() {
   }));
 
   render();
-  setupCheck(form);
+  setupCheck(form, () => { monthCache.clear(); render(); });
 }
 
-function setupCheck(form) {
+function setupCheck(form, onQueued) {
   const panel = $("#check-progress");
   const bar = $("#progress-bar");
   const track = $(".progress-track");
@@ -205,7 +245,7 @@ function setupCheck(form) {
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (form.dataset.remote === "1") return;
+    if (form.dataset.remote === "1") { remoteCheck(); return; }
     const latest = event.submitter && event.submitter.id === "check-latest";
     const body = new FormData(form);
     if (latest) body.set("edition_date", "");
@@ -266,6 +306,50 @@ function setupCheck(form) {
     };
     poll();
   });
+
+  // Online site: one request that either finishes the check or queues it for the office PC.
+  async function remoteCheck() {
+    const body = new FormData(form);
+    const requested = body.get("edition_date");
+    if (!requested) {
+      $("#date-status").textContent = "Pick a date in the calendar first.";
+      return;
+    }
+    buttons.forEach((button) => { button.disabled = true; });
+    panel.hidden = false;
+    panel.classList.remove("failed", "queued");
+    message.removeAttribute("role");
+    $("#progress-steps").hidden = true;
+    title.textContent = `Checking ${longDate(requested)}…`;
+    message.textContent = "Contacting the newspaper's website. A full check can take up to 5 minutes; please keep this page open.";
+    bar.style.width = "15%";
+    const started = Date.now();
+    const tick = window.setInterval(() => { timer.textContent = `${Math.round((Date.now() - started) / 1000)}s`; }, 1000);
+    try {
+      const response = await fetch("/api/check", { method: "POST", body, credentials: "same-origin" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || `The check could not run (HTTP ${response.status}).`);
+      if (data.status === "done") {
+        bar.style.width = "100%";
+        title.textContent = "Check complete. Opening results…";
+        window.location.assign(data.result_url);
+        return;
+      }
+      panel.classList.add("queued");
+      bar.style.width = "100%";
+      title.textContent = "Check requested";
+      message.textContent = data.message;
+      onQueued();
+    } catch (error) {
+      panel.classList.add("failed");
+      title.textContent = "Check not done";
+      message.setAttribute("role", "alert");
+      message.textContent = `${error.message} No result was saved for this date.`;
+    } finally {
+      window.clearInterval(tick);
+      buttons.forEach((button) => { button.disabled = false; });
+    }
+  }
 }
 
 /* ---------- Results: filters and selection ---------- */

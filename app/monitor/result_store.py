@@ -22,7 +22,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
@@ -32,6 +32,7 @@ from dotenv import dotenv_values
 
 from app.core.config import IS_VERCEL, settings
 from app.monitor.epaper_monitor import (
+    COLOMBO,
     PUBLICATIONS,
     Publication,
     _atomic_write_text,
@@ -130,6 +131,14 @@ def remote_mode() -> bool:
 
 def manifest_blob(publication: Publication, edition_date: date) -> str:
     return f"{ROOT}/results/{publication.key}/{edition_date.isoformat()}.json"
+
+
+def request_blob(publication: Publication, edition_date: date) -> str:
+    return f"{ROOT}/requests/{publication.key}/{edition_date.isoformat()}.json"
+
+
+def oldest_kept_date() -> date:
+    return colombo_today() - timedelta(days=KEEP_DAYS)
 
 
 def image_blob(publication: Publication, edition_date: date, url: str) -> str:
@@ -288,9 +297,8 @@ def publish_edition(
     index = _load_index(backend)
     warnings = _reconcile_index(index, backend, report_root)
     # Set explicitly in case the listing has not caught up with the upload above.
-    index["editions"].setdefault(publication.key, {})[edition_date.isoformat()] = _summary(
-        manifest, len(failures)
-    )
+    entry = _summary(manifest, len(failures))
+    index["editions"].setdefault(publication.key, {})[edition_date.isoformat()] = entry
     removed = _prune(index, backend)
     backend.put(INDEX, json.dumps(index, indent=1).encode("utf-8"), "application/json")
     return {
@@ -298,7 +306,69 @@ def publish_edition(
         "image_failures": failures,
         "removed_editions": removed,
         "warnings": warnings,
+        "index_entry": entry,
     }
+
+
+# Check requests: the online site cannot reach the publisher, so "Check now"
+# leaves a request here and the office PC's request worker runs it.
+
+
+def request_check(
+    publication: Publication, edition_date: date, backend: Backend, *, force: bool, reason: str
+) -> dict:
+    entry = {
+        "publication": publication.key,
+        "edition_date": edition_date.isoformat(),
+        "status": "queued",
+        "force": force,
+        "reason": reason,
+        "requested_at": datetime.now(COLOMBO).isoformat(timespec="seconds"),
+        "error": "",
+    }
+    backend.put(
+        request_blob(publication, edition_date),
+        json.dumps(entry).encode("utf-8"),
+        "application/json",
+    )
+    return entry
+
+
+def pending_requests(backend: Backend, publication: Publication | None = None) -> list[dict]:
+    """Every saved request (queued or failed), oldest first."""
+    prefix = f"{ROOT}/requests/" + (f"{publication.key}/" if publication else "")
+    found = []
+    for pathname in backend.list(prefix):
+        raw = backend.get(pathname)
+        try:
+            entry = json.loads(raw) if raw else None
+        except ValueError:
+            entry = None
+        key, _, name = pathname[len(f"{ROOT}/requests/"):].partition("/")
+        if not isinstance(entry, dict):
+            # Keep it visible: an unreadable request must not vanish silently.
+            entry = {
+                "publication": key, "edition_date": name.removesuffix(".json"),
+                "status": "failed", "force": False, "requested_at": "",
+                "error": "The saved request is unreadable; press Check now again.",
+            }
+        found.append(entry)
+    return sorted(found, key=lambda entry: entry.get("requested_at") or "")
+
+
+def finish_request(publication: Publication, edition_date: date, backend: Backend) -> None:
+    backend.delete([request_blob(publication, edition_date)])
+
+
+def fail_request(entry: dict, error: str, backend: Backend) -> None:
+    publication = PUBLICATIONS[entry["publication"]]
+    failed = dict(entry, status="failed", error=error,
+                  failed_at=datetime.now(COLOMBO).isoformat(timespec="seconds"))
+    backend.put(
+        request_blob(publication, date.fromisoformat(entry["edition_date"])),
+        json.dumps(failed).encode("utf-8"),
+        "application/json",
+    )
 
 
 def _prune(index: dict, backend: Backend, keep_days: int = KEEP_DAYS) -> list[str]:
@@ -343,11 +413,35 @@ class RemoteResults:
     def editions(self, publication: Publication) -> dict[str, dict]:
         return self.index()["editions"].get(publication.key, {})
 
+    def remember(self, publication: Publication, edition_date: date, summary: dict) -> None:
+        """Show a result this server just uploaded before the index cache catches up."""
+        with self._lock:
+            if self._index is not None:
+                self._index["editions"].setdefault(publication.key, {})[
+                    edition_date.isoformat()] = summary
+
+    def requests(self, publication: Publication) -> dict[str, dict]:
+        return {
+            entry["edition_date"]: entry
+            for entry in pending_requests(self.backend, publication)
+        }
+
+    def request_check(
+        self, publication: Publication, edition_date: date, *, force: bool, reason: str
+    ) -> dict:
+        return request_check(publication, edition_date, self.backend, force=force, reason=reason)
+
     def ensure_manifest(self, publication: Publication, edition_date: date) -> None:
         entry = self.editions(publication).get(edition_date.isoformat())
         local = manifest_path(self.report_root, publication, edition_date)
         if entry is None:
-            local.unlink(missing_ok=True)
+            # The cached index can lag behind a fresh upload, so ask for the
+            # result itself before saying the date is unchecked.
+            if local.is_file():
+                return
+            raw = self.backend.get(manifest_blob(publication, edition_date))
+            if raw is not None:
+                _atomic_write_text(local, raw.decode("utf-8"))
             return
         cached = load_manifest(self.report_root, publication, edition_date)
         if cached and cached.get("generated_at") == entry.get("generated_at"):
