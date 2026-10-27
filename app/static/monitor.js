@@ -427,6 +427,11 @@ function setupResults() {
   function updateSelection() {
     const count = selectedUids().length;
     countLabel.textContent = `${count} selected`;
+    const downloadSelected = $("#download-zip");
+    if (downloadSelected) {
+      downloadSelected.textContent = count === 0 ? "Download selected"
+        : count === 1 ? "Download 1 selected (JPG)" : `Download ${count} selected (ZIP)`;
+    }
     downloadButtons.forEach((button) => { if (button) button.disabled = count === 0; });
     cards.forEach((card) => card.classList.toggle("is-selected", $(".item-select", card).checked));
   }
@@ -1038,6 +1043,13 @@ function setupDownloads(results, editor) {
   $("#download-zip").addEventListener("click", async () => {
     busy();
     const { output, failures } = await renderSelected(false);
+    if (output.length === 1 && !failures.length) {
+      // A single article downloads as its own image, not a ZIP of one.
+      const { item, format, data } = output[0];
+      saveBlob(new Blob([data], { type: format === "png" ? "image/png" : "image/jpeg" }), clipFilename(edition, item, format));
+      finish(failures, "Image downloaded.");
+      return;
+    }
     if (output.length) {
       const used = new Set();
       const files = output.map(({ item, format, data }) => {

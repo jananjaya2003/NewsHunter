@@ -184,7 +184,8 @@ def test_results_offer_category_choice_viewer_and_full_text(monkeypatch, tmp_pat
 
     for hook in ('id="categories-all"', 'id="categories-none"', 'class="tile-tick"',
                  'data-testid="view-article"', 'data-testid="viewer"', 'id="unviewed-only"',
-                 'class="viewed-badge"', 'id="bulk-stamp"', 'id="edit-stamp"'):
+                 'class="viewed-badge"', 'id="bulk-stamp"', 'id="edit-stamp"',
+                 'data-testid="download-selected"'):
         assert hook in page
     # The viewer shows a summary instead of the full machine-read text.
     data = page.split('id="edition-data">', 1)[1].split("</script>", 1)[0]
