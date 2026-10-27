@@ -188,7 +188,7 @@
         {% if article.borderline %}<span class="chip possible">Possible – verify</span>{% endif %}
         <span class="viewed-badge" hidden>✓ Viewed</span>
       </div>
-      <p class="page-label">PAGE {{ article.page_number }} · {% if article.kind == 'advert' %}ADVERT / NOTICE{% else %}NEWS ARTICLE{% endif %}</p>
+      <p class="page-label"><span class="date-label">{{ selected_publication.name | upper }} · {{ edition_date }}</span> · PAGE {{ article.page_number }} · {% if article.kind == 'advert' %}ADVERT / NOTICE{% else %}NEWS ARTICLE{% endif %}</p>
       <h3>{{ article.title }}</h3>
       {% if article.institutions %}<p class="fact"><strong>Institution:</strong> {{ article.institutions | join(' · ') }}</p>{% endif %}
       {% if article.dates_mentioned %}<p class="fact"><strong>Dates in text (verify):</strong> {{ article.dates_mentioned | join(' · ') }}</p>{% endif %}

@@ -484,7 +484,7 @@ function setupViewer(results, editor) {
     if (!item || !card) return;
     current = uid;
     $("#viewer-title").textContent = item.title || "Untitled item";
-    $("#viewer-meta").textContent = `PAGE ${item.page_number} · ${item.kind === "advert" ? "ADVERT / NOTICE" : "NEWS ARTICLE"}`;
+    $("#viewer-meta").textContent = `${results.edition.publication_name.toUpperCase()} · ${longDate(results.edition.edition_date).toUpperCase()} · PAGE ${item.page_number} · ${item.kind === "advert" ? "ADVERT / NOTICE" : "NEWS ARTICLE"}`;
     $("#viewer-chips").replaceChildren(...$$(".chip-row .chip", card).map((chip) => chip.cloneNode(true)));
     const facts = [];
     if (item.institutions && item.institutions.length) facts.push(fact("Institution", item.institutions.join(" · ")));
@@ -571,7 +571,7 @@ function renderClip(image, settings) {
   const clipWidth = Math.max(1, Math.round(crop.w * scale));
   const clipHeight = Math.max(1, Math.round(crop.h * scale));
   // The date label sits in a strip below the clipping so it never hides its text.
-  const fontSize = Math.max(13, Math.round(clipWidth * 0.018));
+  const fontSize = Math.max(16, Math.round(clipWidth * 0.024));
   const strip = settings.stamp ? Math.round(fontSize * 1.9) : 0;
   canvas.width = clipWidth;
   canvas.height = clipHeight + strip;
@@ -584,7 +584,7 @@ function renderClip(image, settings) {
     context.fillStyle = "#d9ddd8";
     context.fillRect(0, clipHeight, clipWidth, Math.max(1, Math.round(fontSize / 12)));
     context.fillStyle = "#151a18";
-    context.font = `600 ${fontSize}px Arial, sans-serif`;
+    context.font = `700 ${fontSize}px Arial, sans-serif`;
     context.textAlign = "right";
     context.textBaseline = "middle";
     const padding = Math.round(fontSize * 0.7);
@@ -715,11 +715,12 @@ function setupEditor(results) {
     const settings = editorSettings();
     const width = settings.width && settings.width < crop.w * 4 ? settings.width : Math.round(crop.w);
     const height = Math.round(crop.h * (width / crop.w));
-    info.textContent = `${width} × ${height} px · estimating file size…`;
+    const label = settings.stamp ? ` · label: ${settings.stamp}` : "";
+    info.textContent = `${width} × ${height} px${label} · estimating file size…`;
     infoTimer = window.setTimeout(async () => {
       try {
         const blob = await canvasBlob(renderClip(image, settings), settings.format, settings.quality);
-        info.textContent = `${width} × ${height} px · ${formatBytes(blob.size)} ${settings.format.toUpperCase()}`;
+        info.textContent = `${width} × ${height} px · ${formatBytes(blob.size)} ${settings.format.toUpperCase()}${label}`;
       } catch (error) { info.textContent = error.message; }
     }, 350);
   }

@@ -473,6 +473,7 @@ button.small { min-height: 38px; padding: .45rem .8rem; font-size: .8rem; }
 }
 .result-card[hidden] { display: none; }
 .result-card.is-selected { outline: 3px solid rgb(0 134 91 / 35%); }
+.date-label { color: var(--green-deep); font-weight: 800; }
 .viewed-badge { padding: .15rem .5rem; border-radius: 999px; background: var(--green-deep); color: white; font-size: .72rem; font-weight: 800; }
 .viewed-badge[hidden] { display: none; }
 .result-card.is-viewed .article-thumb { opacity: .78; }
