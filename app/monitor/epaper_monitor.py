@@ -68,6 +68,18 @@ PUBLICATIONS = {
     "sunday-observer": Publication("sunday-observer", "Sunday Observer", 2),
 }
 DEFAULT_PUBLICATION = PUBLICATIONS["daily-news"]
+# Personal classifieds: never tenders or health news, and many pages of OCR.
+# Listed on every result as not screened, so the gap is visible.
+SKIPPED_SECTIONS = frozenset({"matrimonial", "marriage proposals"})
+
+
+def result_complete(manifest: dict | None) -> bool:
+    """A saved result counts as complete only if every published section was read.
+
+    Results saved before supplements and advert sections (ADZ, Advertisements,
+    Observer Jobs...) were checked can miss tenders, so they need a re-check.
+    """
+    return bool(manifest and manifest.get("complete") and manifest.get("sections_checked"))
 
 CLINICAL_TERMS = {
     "addiction",
@@ -322,6 +334,10 @@ class PageInfo:
     width: int = 0
     height: int = 0
     image_url: str = ""
+    # Publisher section (edition id) when the page is in a supplement or advert
+    # section rather than the main paper; 0 means the main paper.
+    edition_id: int = 0
+    section: str = ""
 
 
 @dataclass(frozen=True)
@@ -383,6 +399,7 @@ class EditionResult:
     matching_warning: str = ""
     # True when re-running the check could improve the result (AI outage).
     matching_retryable: bool = False
+    sections: list[str] = field(default_factory=list)
 
 
 class EpaperError(RuntimeError):
@@ -474,11 +491,11 @@ class EpaperClient:
         )
         response.raise_for_status()
 
-    def _page_list(self, issue_date: date | datetime) -> list[dict]:
+    def _page_list(self, issue_date: date | datetime, edition_id: int | None = None) -> list[dict]:
         response = self._worker_session().post(
             self.base_url + "Home/GetAllpagespost",
             json={
-                "editionid": self.publication.edition_id,
+                "editionid": edition_id or self.publication.edition_id,
                 "editiondate": issue_date.strftime("%d/%m/%Y"),
             },
             timeout=self._request_timeout(),
@@ -522,6 +539,82 @@ class EpaperClient:
                 message += f" The nearest earlier edition is {nearest:%A %d %B %Y}."
             raise EpaperError(message)
         return exact
+
+    def sections(self) -> list[tuple[int, str]]:
+        """Every section the publisher offers (main papers, supplements, adverts)."""
+        response = self._worker_session().get(
+            self.base_url + "Home/GetEditionsForSearch", timeout=self._request_timeout()
+        )
+        response.raise_for_status()
+        payload = json.loads(response.content)
+        if not isinstance(payload, list):
+            raise EpaperError("The publisher returned an unexpected section list.")
+        return [
+            (int(item["EditionId"]), str(item.get("EditionDisplayName") or f"Section {item['EditionId']}"))
+            for item in payload
+            if isinstance(item, dict) and item.get("EditionId") is not None
+        ]
+
+    def section_pages(self, issue_date: date | datetime) -> tuple[list[PageInfo], list[str], list[str]]:
+        """Pages of every other section published on this exact date.
+
+        Tender notices often run in advert sections (ADZ, Advertisements,
+        Observer Jobs) and supplements, not in the main paper. Returns
+        (pages, sections read, warnings).
+        """
+        requested_text = _as_date(issue_date).strftime("%d/%m/%Y")
+        main_ids = {publication.edition_id for publication in PUBLICATIONS.values()}
+        try:
+            sections = [entry for entry in self.sections() if entry[0] not in main_ids]
+        except (requests.RequestException, ValueError, KeyError, EpaperError) as exc:
+            LOGGER.warning("Section list unavailable: %s", exc)
+            warning = (
+                "The newspaper's supplement and advert sections could not be listed, so only the "
+                "main paper was checked. Tenders in ADZ, Advertisements or supplements may be "
+                "missing; review them in the e-paper and re-check."
+            )
+            return [], [], [warning]
+        pages: list[PageInfo] = []
+        read: list[str] = []
+        warnings: list[str] = []
+
+        def fetch(entry: tuple[int, str]):
+            return entry, self._page_list(issue_date, edition_id=entry[0])
+
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            futures = [pool.submit(fetch, entry) for entry in sections]
+            for future, entry in zip(futures, sections):
+                edition_id, name = entry
+                try:
+                    _, payload = future.result()
+                except (requests.RequestException, ValueError, EpaperError) as exc:
+                    LOGGER.warning("Section %s unavailable: %s", name, exc)
+                    warnings.append(
+                        f"The {name} section could not be read; review it in the e-paper."
+                    )
+                    continue
+                exact = [item for item in payload if str(item.get("EditionDate") or "") == requested_text]
+                if not exact:
+                    continue
+                if name.lower() in SKIPPED_SECTIONS:
+                    read.append(f"{name} (not screened: personal classifieds)")
+                    continue
+                label = name if sum(1 for _, other in sections if other == name) == 1 else f"{name} {edition_id}"
+                read.append(label)
+                pages.extend(
+                    PageInfo(
+                        page_id=int(item["PageId"]),
+                        page_number=f"{label} {item.get('PageNo') or item.get('PageNumber') or ''}".strip(),
+                        edition_date=str(item.get("EditionDate") or ""),
+                        width=int(item.get("PageWidth") or 0),
+                        height=int(item.get("PageHeight") or 0),
+                        image_url=str(item.get("MrImageUrl") or item.get("SSResolution") or ""),
+                        edition_id=edition_id,
+                        section=label,
+                    )
+                    for item in exact
+                )
+        return pages, read, warnings
 
     def latest_edition_date(self) -> date:
         """Latest edition, including an early upload of tomorrow's paper."""
@@ -958,9 +1051,20 @@ def select_medical_stories(
     return selected
 
 
-def source_url(publication: Publication, edition_date: date, page_id: int) -> str:
+def page_sort_key(page_number: str) -> tuple:
+    """Main-paper pages by number, then each section's pages ("ADZ 3") by number."""
+    text = str(page_number or "")
+    if text.isdigit():
+        return (0, "", int(text))
+    name, _, number = text.rpartition(" ")
+    return (1, name, int(number) if number.isdigit() else 0)
+
+
+def source_url(
+    publication: Publication, edition_date: date, page_id: int, edition_id: int = 0
+) -> str:
     return (
-        f"{BASE_URL}home/ArticleView?eid={publication.edition_id}"
+        f"{BASE_URL}home/ArticleView?eid={edition_id or publication.edition_id}"
         f"&edate={edition_date:%d/%m/%Y}&pgid={page_id}"
     )
 
@@ -1018,8 +1122,8 @@ def _collect_objects(
                 pictures.append((page, item))
             _notify(progress, "pages", done, len(pages), f"Read layout of page {done} of {len(pages)}")
 
-    def order(pair: tuple[PageInfo, PageObject]) -> tuple[int, int]:
-        return (int(pair[0].page_number or 0) if pair[0].page_number.isdigit() else 0, pair[1].object_id)
+    def order(pair: tuple[PageInfo, PageObject]) -> tuple:
+        return (*page_sort_key(pair[0].page_number), pair[1].object_id)
 
     return sorted(stories, key=order), sorted(pictures, key=order), story_photos, failed_pages
 
@@ -1231,6 +1335,7 @@ def _read_adverts(
                 "object_id": item.object_id,
                 "page_id": page.page_id,
                 "page_number": page.page_number,
+                "edition_id": page.edition_id,
                 "image_url": url,
                 "reason": reason,
                 "rect": [item.left, item.top, item.right, item.bottom],
@@ -1260,6 +1365,7 @@ def build_items(
     pages: list[PageInfo],
 ) -> list[dict]:
     page_sizes = {page.page_id: (page.width, page.height) for page in pages}
+    page_sections = {page.page_id: page for page in pages}
     selected_by_id = {story.story_id: story for story in selected}
     items: list[dict] = []
     for candidate in candidates:
@@ -1292,7 +1398,11 @@ def build_items(
                 "excerpt": _excerpt(story),
                 "text": story.body[:8000],
                 "image_url": story.image_url,
-                "source_url": source_url(publication, edition_date, story.page_id),
+                "source_url": source_url(
+                    publication, edition_date, story.page_id,
+                    getattr(page_sections.get(story.page_id), "edition_id", 0),
+                ),
+                "section": getattr(page_sections.get(story.page_id), "section", ""),
                 "categories": classification.categories,
                 "primary_category": classification.primary,
                 "priority": classification.priority,
@@ -1314,8 +1424,8 @@ def build_items(
             }
         )
 
-    def page_order(item: dict) -> int:
-        return int(item["page_number"]) if str(item["page_number"]).isdigit() else 0
+    def page_order(item: dict) -> tuple:
+        return page_sort_key(item["page_number"])
 
     items.sort(key=lambda item: (-item["priority"], -item["strength"], page_order(item), item["uid"]))
     return items
@@ -1334,8 +1444,19 @@ def check_edition(
     if edition_date is None:
         edition_date = client.latest_edition_date()
     pages = client.pages(edition_date)
-    LOGGER.info("Found %d pages for %s %s", len(pages), publication.name, edition_date)
+    main_pages = len(pages)
+    if isinstance(client, EpaperClient):
+        extra_pages, sections_read, section_warnings = client.section_pages(edition_date)
+    else:
+        extra_pages, sections_read, section_warnings = [], [], []
+    pages = pages + extra_pages
+    LOGGER.info(
+        "Found %d pages for %s %s (%d main, sections: %s)", len(pages), publication.name,
+        edition_date, main_pages, ", ".join(sections_read) or "none",
+    )
     result = EditionResult(publication=publication, edition_date=edition_date, pages=pages)
+    result.sections = ["Main paper", *sections_read]
+    result.warnings.extend(section_warnings)
     if edition_date > colombo_today():
         result.warnings.append(
             f"This is an early upload of the {edition_date:%d %B %Y} edition. The publisher "
@@ -1352,6 +1473,7 @@ def check_edition(
                 "object_id": 0,
                 "page_id": page.page_id,
                 "page_number": page.page_number,
+                "edition_id": page.edition_id,
                 "image_url": page.image_url,
                 "reason": "Page layout unreadable; the whole page was not screened.",
                 "rect": [],
@@ -1409,6 +1531,8 @@ def write_manifest(output_root: Path, result: EditionResult) -> Path:
         "edition_date": result.edition_date.isoformat(),
         "generated_at": run_time.isoformat(),
         "complete": not result.warnings and not result.matching_retryable,
+        "sections_checked": True,
+        "sections": result.sections,
         "article_count": len(result.items),
         "category_counts": counts,
         "matching_method": result.matching_method,
@@ -1451,9 +1575,21 @@ def run_edition_check(
     client = client or EpaperClient(publication=publication)
     if edition_date is not None and not force:
         cached = load_manifest(output_root, publication, edition_date)
-        if cached and cached.get("complete"):
+        if result_complete(cached):
             LOGGER.info("Reusing complete result for %s %s", publication.name, edition_date)
             return manifest_path(output_root, publication, edition_date), edition_date
+        if cached and cached.get("complete") and isinstance(client, EpaperClient):
+            # Saved before sections were read: if no other section was published
+            # that day, the saved result already covers everything.
+            client.initialise()
+            extra, _, section_warnings = client.section_pages(edition_date)
+            if not extra and not section_warnings:
+                LOGGER.info("No extra sections on %s %s; marking saved result complete",
+                            publication.name, edition_date)
+                cached.update(sections_checked=True, sections=["Main paper"])
+                destination = manifest_path(output_root, publication, edition_date)
+                _atomic_write_text(destination, json.dumps(cached, ensure_ascii=False, indent=1))
+                return destination, edition_date
     result = check_edition(
         publication,
         edition_date,

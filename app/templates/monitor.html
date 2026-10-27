@@ -99,12 +99,14 @@
 {% if manifest %}
 {% if manifest.matching_warning %}<div class="notice" role="status"><strong>Screening:</strong> {{ manifest.matching_method }} · {{ manifest.matching_warning }}</div>{% endif %}
 {% for warning in manifest.warnings %}<div class="notice danger" role="alert">{{ warning }}</div>{% endfor %}
+{% if not manifest.sections_checked %}<div class="notice danger" role="alert" data-testid="sections-missing">This result was checked before the newspaper's supplement and advert sections (ADZ, Advertisements, Observer Jobs, supplements) were included, so tenders printed there may be missing. Tick &ldquo;Re-check even if a saved result exists&rdquo; and press Check now.</div>{% endif %}
 
 <section class="results-heading" data-testid="results-heading">
   <div>
     <p class="eyebrow">RESULTS</p>
     <h2>{{ selected_publication.name }} · {{ edition_date }}</h2>
     <p class="muted results-meta">{{ manifest.stats.pages }} pages · {{ manifest.stats.articles }} articles and {{ manifest.stats.adverts_read }} adverts screened · checked {{ manifest.generated_at[:16].replace('T', ' ') }}</p>
+    {% if manifest.sections %}<p class="muted results-meta" data-testid="sections-read">Sections read: {{ manifest.sections | join(' · ') }}</p>{% endif %}
   </div>
   <span class="result-count" id="result-count" data-total="{{ articles | length }}">{{ articles | length }} item{% if articles | length != 1 %}s{% endif %}</span>
 </section>

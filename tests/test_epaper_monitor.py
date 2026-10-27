@@ -359,3 +359,129 @@ def test_generate_report_for_date_checks_only_the_requested_edition(monkeypatch,
     assert report_path == tmp_path / "manifest.json"
     assert report_date.date() == requested.date()
     assert calls == [(tmp_path, "sunday-observer", requested.date(), False)]
+
+
+def _section_client(sections, pages_by_id):
+    from app.monitor.epaper_monitor import PUBLICATIONS, EpaperClient
+
+    client = EpaperClient(PUBLICATIONS["sunday-observer"])
+    client.sections = sections
+
+    def page_list(issue_date, edition_id=None):
+        result = pages_by_id[edition_id]
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    client._page_list = page_list
+    return client
+
+
+def _page(page_id, number, day="25/10/2026"):
+    return {"PageId": page_id, "PageNo": number, "EditionDate": day, "MrImageUrl": f"https://x/{page_id}.jpg"}
+
+
+def test_advert_sections_published_that_day_are_checked():
+    # Reproduces 2026-10-25: a tender in the ADZ section was missed.
+    from datetime import date
+
+    import requests
+
+    client = _section_client(
+        lambda: [(2, "Sunday Observer"), (18, "ADZ"), (17, "Advertisements"),
+                 (8, "Advertisements"), (23, "Matrimonial"), (15, "Observer Jobs")],
+        {
+            18: [_page(900, "1"), _page(901, "2")],
+            17: [_page(910, "1")],
+            8: [_page(800, "1", day="07/10/2019")],  # old section: nearest edition only
+            23: [_page(930, "1")],
+            15: requests.ConnectionError("reset"),
+        },
+    )
+    pages, read, warnings = client.section_pages(date(2026, 10, 25))
+
+    assert [page.page_number for page in pages] == ["ADZ 1", "ADZ 2", "Advertisements 17 1"]
+    assert {page.edition_id for page in pages} == {18, 17}
+    assert "Matrimonial (not screened: personal classifieds)" in read
+    assert warnings == ["The Observer Jobs section could not be read; review it in the e-paper."]
+
+
+def test_unlisted_sections_are_a_visible_warning():
+    from datetime import date
+
+    import requests
+
+    def broken():
+        raise requests.ConnectionError("down")
+
+    client = _section_client(broken, {})
+    pages, read, warnings = client.section_pages(date(2026, 10, 25))
+    assert pages == [] and read == []
+    assert "only the main paper was checked" in warnings[0]
+
+
+def test_section_pages_link_to_their_section_and_sort_after_main_paper():
+    from datetime import date
+
+    from app.monitor.epaper_monitor import PUBLICATIONS, page_sort_key, source_url
+
+    url = source_url(PUBLICATIONS["sunday-observer"], date(2026, 10, 25), 900, 18)
+    assert "eid=18" in url and "pgid=900" in url
+    assert sorted(["ADZ 2", "10", "ADZ 1", "2"], key=page_sort_key) == ["2", "10", "ADZ 1", "ADZ 2"]
+
+
+def _legacy_result(tmp_path):
+    import json as _json
+    from datetime import date
+
+    from app.monitor.epaper_monitor import MANIFEST_SCHEMA_VERSION, PUBLICATIONS, manifest_path
+
+    publication, day = PUBLICATIONS["daily-news"], date(2026, 10, 23)
+    path = manifest_path(tmp_path, publication, day)
+    path.parent.mkdir(parents=True)
+    path.write_text(_json.dumps({"cache_schema_version": MANIFEST_SCHEMA_VERSION, "complete": True,
+                                 "edition_date": day.isoformat(), "articles": []}), encoding="utf-8")
+    return publication, day
+
+
+class _SectionOnlyClient:
+    def __init__(self, extra):
+        self.extra = extra
+
+    def initialise(self):
+        pass
+
+    def section_pages(self, issue_date):
+        return self.extra, [], []
+
+
+def _as_epaper_client(extra):
+    from app.monitor.epaper_monitor import EpaperClient
+
+    return type("FakeClient", (_SectionOnlyClient, EpaperClient), {})(extra)
+
+
+def test_old_result_without_extra_sections_is_upgraded_without_rechecking(monkeypatch, tmp_path):
+    from app.monitor import epaper_monitor
+
+    publication, day = _legacy_result(tmp_path)
+    monkeypatch.setattr(epaper_monitor, "check_edition",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no full re-check")))
+    epaper_monitor.run_edition_check(tmp_path, publication, day, client=_as_epaper_client([]))
+    saved = epaper_monitor.load_manifest(tmp_path, publication, day)
+    assert epaper_monitor.result_complete(saved)
+
+
+def test_old_result_is_rechecked_when_sections_were_published(monkeypatch, tmp_path):
+    from app.monitor import epaper_monitor
+    from app.monitor.epaper_monitor import PageInfo
+
+    publication, day = _legacy_result(tmp_path)
+    calls = []
+    monkeypatch.setattr(epaper_monitor, "check_edition", lambda *a, **k: calls.append(a) or (_ for _ in ()).throw(RuntimeError("checked")))
+    client = _as_epaper_client([PageInfo(page_id=1, page_number="ADZ 1", edition_date="23/10/2026", edition_id=18)])
+    try:
+        epaper_monitor.run_edition_check(tmp_path, publication, day, client=client)
+    except RuntimeError:
+        pass
+    assert len(calls) == 1

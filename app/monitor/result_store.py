@@ -40,6 +40,7 @@ from app.monitor.epaper_monitor import (
     image_cache_path,
     load_manifest,
     manifest_path,
+    result_complete,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -192,7 +193,7 @@ def _load_index(backend: Backend) -> dict:
 def _summary(manifest: dict, missing_images: int | None) -> dict:
     return {
         "generated_at": manifest.get("generated_at"),
-        "complete": bool(manifest.get("complete")),
+        "complete": result_complete(manifest),
         "count": manifest.get("article_count", 0),
         "tenders": manifest.get("category_counts", {}).get("medical_tender", 0),
         "missing_images": missing_images,

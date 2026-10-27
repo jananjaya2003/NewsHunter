@@ -37,6 +37,7 @@ from app.monitor.epaper_monitor import (
     image_cache_path,
     load_manifest,
     manifest_path,
+    result_complete,
     run_edition_check,
 )
 
@@ -428,7 +429,7 @@ def _web_manifest(publication_key: str, manifest: dict) -> dict:
         item["thumb_web_url"] = f"{base}?w=360" if item.get("image_url") else ""
         item["source_url"] = (
             f"https://epaperst.lakehouse.lk/home/ArticleView?eid="
-            f"{PUBLICATIONS[publication_key].edition_id}"
+            f"{item.get('edition_id') or PUBLICATIONS[publication_key].edition_id}"
             f"&edate={date.fromisoformat(edition_date):%d/%m/%Y}&pgid={item.get('page_id')}"
         )
     return manifest
@@ -617,7 +618,7 @@ def _online_check(publication, edition_date: date, force: bool) -> dict:
     if not force:
         _sync_manifest(publication, edition_date)
         saved = load_manifest(MONITOR_REPORT_ROOT, publication, edition_date)
-        if saved and saved.get("complete"):
+        if result_complete(saved):
             return {"status": "done", "result_url": _result_url(publication, edition_date)}
     if time.monotonic() < _publisher_blocked_until:
         return _queue_check(publication, edition_date, force, "it refused this server recently")
@@ -760,7 +761,7 @@ def api_availability(publication: str, month: str):
         manifest = load_manifest(MONITOR_REPORT_ROOT, selected, value)
         if manifest:
             checked[value.isoformat()] = {
-                "complete": bool(manifest.get("complete")),
+                "complete": result_complete(manifest),
                 "count": manifest.get("article_count", 0),
                 "tenders": manifest.get("category_counts", {}).get("medical_tender", 0),
             }

@@ -22,6 +22,8 @@ SAVED_MANIFEST = {
     "edition_date": "2026-10-15",
     "generated_at": "2026-10-15T20:00:00+05:30",
     "complete": True,
+    "sections_checked": True,
+    "sections": ["Main paper"],
     "article_count": 1,
     "category_counts": {"facility": 1},
     "matching_method": "Local medical keyword rules",
@@ -194,6 +196,19 @@ def test_results_offer_category_choice_viewer_and_full_text(monkeypatch, tmp_pat
     assert 'data-testid="viewer-summary"' in page
     # Versioned script URL, so browsers load a changed script instead of a cached one.
     assert re.search(r'monitor\.js\?v=[0-9a-f]{12}"', page)
+
+
+def test_result_from_before_sections_were_read_is_flagged(monkeypatch, tmp_path):
+    legacy = {key: value for key, value in SAVED_MANIFEST.items() if key not in {"sections_checked", "sections"}}
+    report_dir = tmp_path / "daily-news" / "2026-10-15"
+    report_dir.mkdir(parents=True)
+    (report_dir / "manifest.json").write_text(json.dumps(legacy), encoding="utf-8")
+    monkeypatch.setattr(main_module, "MONITOR_REPORT_ROOT", tmp_path)
+    page = client.get("/monitor", params={"publication": "daily-news", "edition_date": "2026-10-15"}).text
+    assert 'data-testid="sections-missing"' in page
+    # Still shown (never hidden), but not treated as complete.
+    assert "Hospital expands emergency care" in page
+    assert not main_module.result_complete(legacy)
 
 
 def test_security_headers_are_present():
