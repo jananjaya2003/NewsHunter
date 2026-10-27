@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import fitz
+import pymupdf
 
 from app.extraction.pdf_extract import PageText, chunk_pages, extract_pages
 
@@ -25,7 +25,7 @@ def test_long_page_is_split_with_same_page_number():
 
 def test_extract_pages_reads_real_text_pdf(tmp_path: Path):
     path = tmp_path / "edition.pdf"
-    document = fitz.open()
+    document = pymupdf.open()
     page = document.new_page()
     page.insert_text(
         (72, 72),

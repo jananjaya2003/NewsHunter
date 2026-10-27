@@ -7,7 +7,9 @@ param(
 
 # One-time setup on a new Windows PC: Python check, virtual environment,
 # dependencies, .env file and a start-up self-check. Safe to run again.
-$ErrorActionPreference = 'Stop'
+# Native commands are checked through $LASTEXITCODE: with 'Stop', Windows
+# PowerShell 5.1 treats any stderr line from python or pip as fatal.
+$ErrorActionPreference = 'Continue'
 $projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $projectRoot
 
@@ -19,7 +21,7 @@ foreach ($candidate in @(@('py', '-3'), @('python'))) {
     $exe = Get-Command $candidate[0] -ErrorAction SilentlyContinue
     if (-not $exe) { continue }
     $arguments = @($candidate | Select-Object -Skip 1)
-    $version = & $exe.Source @arguments -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>$null
+    $version = & $exe.Source @arguments -c 'import sys; print(*sys.version_info[:2], sep=chr(46))' 2>$null
     if ($LASTEXITCODE -eq 0 -and $version -and [version]$version -ge [version]'3.11') {
         $python = @($exe.Source) + $arguments
         Write-Host "Found Python $version"
@@ -48,7 +50,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Installing dependencies failed. Check the inte
 
 if (-not (Test-Path -LiteralPath '.env')) {
     Step 'Creating .env from .env.example'
-    Copy-Item '.env.example' '.env'
+    Copy-Item '.env.example' '.env' -ErrorAction Stop
     Write-Host 'Add your GEMINI_API_KEY to .env (without it, AI checks and summaries are off and every item is marked for review).' -ForegroundColor Yellow
 } else {
     Step 'Keeping the existing .env'
@@ -65,6 +67,6 @@ if ($Test) {
 }
 
 Write-Host "`nSetup complete." -ForegroundColor Green
-Write-Host 'Start the app:          start.cmd   (then open http://127.0.0.1:8000/monitor)'
+Write-Host 'Start the app:          .\start.cmd   (opens http://127.0.0.1:8000/monitor)'
 Write-Host 'Check one edition:      .venv\Scripts\python.exe -m app.monitor.epaper_monitor --publication daily-news'
 Write-Host 'Run online requests:    .venv\Scripts\python.exe -m app.monitor.request_worker'

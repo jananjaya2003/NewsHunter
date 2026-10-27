@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import fitz
+import pymupdf
 
 
 @dataclass(frozen=True)
@@ -24,7 +24,7 @@ class PdfExtractionError(ValueError):
 
 def extract_pages(path: Path) -> list[PageText]:
     try:
-        document = fitz.open(path)
+        document = pymupdf.open(path)
     except Exception as exc:
         raise PdfExtractionError("The uploaded file is not a readable PDF.") from exc
 

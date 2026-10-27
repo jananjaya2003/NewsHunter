@@ -18,16 +18,19 @@ Needs Windows 10/11, internet access and Python 3.11 or newer
 ([python.org](https://www.python.org/downloads/), tick *Add python.exe to
 PATH*, or `winget install Python.Python.3.12`).
 
-Open **Command Prompt** in the project folder and run:
+Open **Command Prompt** or **PowerShell** in the project folder and run:
 
 ```bat
-setup.cmd
-start.cmd
+.\setup.cmd
+.\start.cmd
 ```
+
+(Type the `.\` too: some company PCs block running files from the current
+folder without it.)
 
 - `setup.cmd` checks Python, creates `.venv`, installs everything, creates
   `.env` and checks that the app loads. It is safe to run again; use
-  `setup.cmd -Test` to also run the test suite.
+  `.\setup.cmd -Test` to also run the test suite.
 - `start.cmd` starts the app and opens <http://127.0.0.1:8000/monitor>.
   Close the window to stop it.
 - Put your **Gemini API key** in `.env` (`GEMINI_API_KEY=`). Without it, items
@@ -38,8 +41,8 @@ From a fresh copy on GitHub:
 ```bat
 git clone https://github.com/jananjaya2003/NewsHunter.git
 cd NewsHunter
-setup.cmd
-start.cmd
+.\setup.cmd
+.\start.cmd
 ```
 
 ## Daily use
@@ -113,7 +116,7 @@ committed.
 ## Development
 
 ```bat
-setup.cmd -Dev
+.\setup.cmd -Dev
 .venv\Scripts\python.exe -m pytest -q
 .venv\Scripts\python.exe -m ruff check .
 ```
