@@ -78,6 +78,59 @@ def test_publish_uploads_result_resized_images_and_index(tmp_path):
     assert again["images_uploaded"] == 0
 
 
+class StaleIndexBackend(MemoryBackend):
+    """Blob's CDN can serve an old index right after it is overwritten."""
+
+    def __init__(self):
+        super().__init__()
+        self.served_index = None
+
+    def get(self, pathname):
+        if pathname == result_store.INDEX:
+            return self.served_index
+        return super().get(pathname)
+
+
+def test_stale_index_read_does_not_drop_uploaded_editions(tmp_path):
+    # Reproduces 2026-10-27: two editions vanished from the site's calendar.
+    backend = StaleIndexBackend()
+    first, second = EDITION, EDITION - timedelta(days=1)
+    for edition in (first, second):
+        save_manifest(tmp_path, edition=edition, tenders=1)
+        result_store.publish_edition(
+            tmp_path, DAILY, edition, backend=backend, fetch_image=lambda url: wide_jpeg()
+        )
+    editions = json.loads(backend.files[result_store.INDEX])["editions"]["daily-news"]
+    assert set(editions) == {first.isoformat(), second.isoformat()}
+
+
+def test_index_recovers_uploaded_result_missing_locally(tmp_path):
+    backend = StaleIndexBackend()
+    other_pc, this_pc = tmp_path / "other", tmp_path / "this"
+    older = EDITION - timedelta(days=2)
+    save_manifest(other_pc, edition=older, tenders=3)
+    result_store.publish_edition(
+        other_pc, DAILY, older, backend=backend, fetch_image=lambda url: wide_jpeg()
+    )
+    save_manifest(this_pc)
+    result_store.publish_edition(
+        this_pc, DAILY, EDITION, backend=backend, fetch_image=lambda url: wide_jpeg()
+    )
+    editions = json.loads(backend.files[result_store.INDEX])["editions"]["daily-news"]
+    assert editions[older.isoformat()]["tenders"] == 3
+
+
+def test_unreadable_uploaded_result_is_reported_not_hidden(tmp_path):
+    backend = MemoryBackend()
+    broken = EDITION - timedelta(days=2)
+    backend.files[result_store.manifest_blob(DAILY, broken)] = b"{not json"
+    save_manifest(tmp_path)
+    summary = result_store.publish_edition(
+        tmp_path, DAILY, EDITION, backend=backend, fetch_image=lambda url: wide_jpeg()
+    )
+    assert any(broken.isoformat() in warning for warning in summary["warnings"])
+
+
 def test_image_failure_is_reported_and_result_still_shared(tmp_path):
     save_manifest(tmp_path, image_urls=(IMAGE_URL, BROKEN_URL))
     backend = MemoryBackend()
@@ -189,6 +242,13 @@ def test_online_site_shows_uploaded_result_and_image(monkeypatch, tmp_path):
     assert 'data-testid="check-now"' not in page.text
     image = client.get(f"/api/image/daily-news/{EDITION.isoformat()}/advert-0")
     assert image.status_code == 200 and image.headers["content-type"] == "image/jpeg"
+
+
+def test_online_site_serves_uploaded_result_as_json(monkeypatch, tmp_path):
+    remote_site(monkeypatch, tmp_path)
+    response = client.get(f"/api/editions/daily-news/{EDITION.isoformat()}")
+    assert response.status_code == 200
+    assert response.json()["category_counts"]["medical_tender"] == 1
 
 
 def test_online_site_refuses_checks_with_explanation(monkeypatch, tmp_path):

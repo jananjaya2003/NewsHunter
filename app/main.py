@@ -579,7 +579,10 @@ def api_availability(publication: str, month: str):
 def api_edition(publication: str, edition_date: str):
     """Machine-readable results (for spreadsheets, scripts or an MCP wrapper)."""
     selected = _publication(publication)
-    manifest = load_manifest(MONITOR_REPORT_ROOT, selected, _parse_edition_date(edition_date))
+    parsed = _parse_edition_date(edition_date)
+    if problem := _sync_manifest(selected, parsed):
+        raise HTTPException(502, problem)
+    manifest = load_manifest(MONITOR_REPORT_ROOT, selected, parsed)
     if manifest is None:
         raise HTTPException(404, "This edition has not been checked yet.")
     return _web_manifest(selected.key, manifest)

@@ -83,6 +83,9 @@ class VercelBlobBackend:
             self.blob.put_blob(
                 pathname, body, access="private", content_type=content_type,
                 allow_overwrite=True,
+                # Results and the index are overwritten; the CDN otherwise keeps
+                # serving the old copy for up to a month.
+                cache_control_max_age=60 if content_type == "application/json" else None,
             )
         except self.blob.BlobError as exc:
             raise StoreError(f"Upload of {pathname} failed: {exc}") from exc
@@ -177,6 +180,63 @@ def _load_index(backend: Backend) -> dict:
     return index
 
 
+def _summary(manifest: dict, missing_images: int | None) -> dict:
+    return {
+        "generated_at": manifest.get("generated_at"),
+        "complete": bool(manifest.get("complete")),
+        "count": manifest.get("article_count", 0),
+        "tenders": manifest.get("category_counts", {}).get("medical_tender", 0),
+        "missing_images": missing_images,
+    }
+
+
+def _reconcile_index(index: dict, backend: Backend, report_root: Path) -> list[str]:
+    """Make the index list exactly the uploaded results.
+
+    Blob may serve an overwritten index from its CDN for a while, so the copy
+    just read can lack editions uploaded moments earlier (this dropped two
+    editions from the site once). The blob listing is always current, so it
+    decides which editions exist; summaries come from the local result, the
+    old index entry, or the uploaded result itself. Returns readable warnings.
+    """
+    results = f"{ROOT}/results/"
+    old = index["editions"]
+    rebuilt: dict[str, dict] = {}
+    warnings = []
+    for pathname in sorted(backend.list(results)):
+        key, _, name = pathname[len(results):].partition("/")
+        publication = PUBLICATIONS.get(key)
+        try:
+            edition_date = date.fromisoformat(name.removesuffix(".json"))
+        except ValueError:
+            publication = None
+        if publication is None:
+            warnings.append(f"Unrecognised saved result {pathname} was left out of the index.")
+            continue
+        value = edition_date.isoformat()
+        previous = old.get(key, {}).get(value)
+        local = load_manifest(report_root, publication, edition_date)
+        if local is not None:
+            same = previous and previous.get("generated_at") == local.get("generated_at")
+            entry = _summary(local, previous.get("missing_images") if same else None)
+        elif previous is not None:
+            entry = previous
+        else:
+            raw = backend.get(pathname)
+            try:
+                entry = _summary(json.loads(raw), None) if raw else None
+            except ValueError:
+                entry = None
+            if entry is None:
+                warnings.append(
+                    f"{publication.name} {value} is uploaded but unreadable; upload it again."
+                )
+                continue
+        rebuilt.setdefault(key, {})[value] = entry
+    index["editions"] = rebuilt
+    return warnings
+
+
 def publish_edition(
     report_root: Path,
     publication: Publication,
@@ -226,16 +286,19 @@ def publish_edition(
         "application/json",
     )
     index = _load_index(backend)
-    index["editions"].setdefault(publication.key, {})[edition_date.isoformat()] = {
-        "generated_at": manifest.get("generated_at"),
-        "complete": bool(manifest.get("complete")),
-        "count": manifest.get("article_count", 0),
-        "tenders": manifest.get("category_counts", {}).get("medical_tender", 0),
-        "missing_images": len(failures),
-    }
+    warnings = _reconcile_index(index, backend, report_root)
+    # Set explicitly in case the listing has not caught up with the upload above.
+    index["editions"].setdefault(publication.key, {})[edition_date.isoformat()] = _summary(
+        manifest, len(failures)
+    )
     removed = _prune(index, backend)
     backend.put(INDEX, json.dumps(index, indent=1).encode("utf-8"), "application/json")
-    return {"images_uploaded": uploaded, "image_failures": failures, "removed_editions": removed}
+    return {
+        "images_uploaded": uploaded,
+        "image_failures": failures,
+        "removed_editions": removed,
+        "warnings": warnings,
+    }
 
 
 def _prune(index: dict, backend: Backend, keep_days: int = KEEP_DAYS) -> list[str]:
@@ -355,6 +418,8 @@ def main(argv: list[str] | None = None) -> int:
                 + (f"; {len(failures)} image(s) FAILED, review those items in the e-paper"
                    if failures else "")
             )
+            for warning in summary.get("warnings", []):
+                print(f"WARNING: {warning}")
             if failures:
                 status = 1
     return status
