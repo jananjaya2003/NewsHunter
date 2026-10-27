@@ -1,167 +1,144 @@
 # News Hunter
 
-For GitHub setup and Vercel preview deployment, see
-[Deployment guide](docs/DEPLOYMENT.md). Production editorial hosting needs
-durable storage and a processing worker; preview storage is temporary.
+News Hunter finds **medical tenders and healthcare news** in the Sri Lankan
+*Daily News* and *Sunday Observer* e-papers for a medical-supplies sales team.
+It reads every page of the main paper **and every section published that day**
+(ADZ, Advertisements, Observer Jobs, Business Observer, supplements). It reads
+advert images with OCR, sorts each item into categories with Gemini AI plus
+local safety rules, and shows the original clippings for human review.
 
-A private-first MVP that extracts only medical and healthcare-service reporting
-from a lawfully obtained newspaper PDF and creates a concise, page-cited brief.
-The agent uses Gemini as its default AI brain with schema-constrained output,
-saves draft stories in SQLite, and requires human approval before a brief can
-be published. An OpenAI engine remains available as an optional fallback.
+Medical completeness comes first. A possibly relevant item is kept and marked
+for review rather than dropped, and any part of the paper that could not be
+read is listed on the result (see [AGENTS.md](AGENTS.md)). Results are
+research leads, not medical advice.
 
-This project does not share subscription credentials or republish a source PDF.
-It also contains an optional, personal-use Daily News monitor that creates a
-local screenshot-only report from the publisher's article viewer. It does not
-automate a login or store a newspaper password.
+## Quick start on any Windows PC
+
+Needs Windows 10/11, internet access and Python 3.11 or newer
+([python.org](https://www.python.org/downloads/), tick *Add python.exe to
+PATH*, or `winget install Python.Python.3.12`).
+
+Open **Command Prompt** in the project folder and run:
+
+```bat
+setup.cmd
+start.cmd
+```
+
+- `setup.cmd` checks Python, creates `.venv`, installs everything, creates
+  `.env` and checks that the app loads. It is safe to run again; use
+  `setup.cmd -Test` to also run the test suite.
+- `start.cmd` starts the app and opens <http://127.0.0.1:8000/monitor>.
+  Close the window to stop it.
+- Put your **Gemini API key** in `.env` (`GEMINI_API_KEY=`). Without it, items
+  are sorted by keyword rules only and every one is marked *Needs review*.
+
+From a fresh copy on GitHub:
+
+```bat
+git clone https://github.com/jananjaya2003/NewsHunter.git
+cd NewsHunter
+setup.cmd
+start.cmd
+```
+
+## Daily use
+
+1. Open the **Newspaper check** page, choose the paper and a date in the
+   calendar, then press **Check now** (tick *Re-check* to refresh a saved result).
+2. Use the category tiles (ticked = shown), *Needs review only* and *Not viewed
+   yet* to narrow the list.
+3. **View** opens an article with a short AI summary. Viewed articles get a
+   ✓ Viewed mark in this browser.
+4. Tick articles and press **Download N selected**, or **Download all shown
+   (ZIP)**. Every image carries the paper, date and page, for example
+   *Daily News · Monday, 26 October 2026 · Page 17*.
+
+Command-line checks (also used by the scheduled task):
+
+```bat
+.venv\Scripts\python.exe -m app.monitor.epaper_monitor --publication daily-news
+.venv\Scripts\python.exe -m app.monitor.epaper_monitor --publication sunday-observer --date 2026-10-25 --force
+```
+
+## How a check works
+
+```text
+publisher e-paper ──► main paper + every section published that day
+                      (Matrimonial classifieds listed as not screened)
+        │
+        ├─ news articles (text) ─────────────┐
+        └─ advert images ─► OCR (Windows OCR,├─► keyword safety rules + Gemini AI
+                            or Gemini)       │   (uncertain items kept, marked for review)
+                                             ▼
+                     result saved in reports\manual\<paper>\<date>\manifest.json
+                     ▲ shown on the web page, uploaded to the online site
+```
+
+A result counts as **complete** only when every section was read, every advert
+was screened and the AI classified every item. Otherwise the page shows why
+and suggests a re-check.
+
+## The online site
+
+The publisher's website refuses cloud servers (HTTP 403), so the online site
+(<https://newshunters.vercel.app>) shows results that the office PC checks
+and uploads to Vercel Blob. Its **Check now** leaves a request that the office
+PC runs with `python -m app.monitor.request_worker`. See
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ## Project structure
 
 ```text
 NewsHunter/
-├── app/                      FastAPI application (Vercel entrypoint: app/main.py)
-│   ├── main.py               Routes, auth and page rendering
-│   ├── core/                 Settings, SQLite database, data models, background jobs
-│   ├── ai/                   Gemini/OpenAI clients and the PDF summarisation agent
-│   ├── medical/              Medical scope rules and tender classification
-│   ├── extraction/           PDF text extraction; advert OCR (Windows, or Gemini on Vercel)
-│   ├── monitor/              Daily e-paper monitor and Vercel Blob result store
-│   ├── templates/            Jinja2 HTML templates
-│   └── static/               CSS, JavaScript and icons
+├── app/
+│   ├── main.py               Web app: pages, API, image labels, online-check flow
+│   ├── monitor/              E-paper checker, sections, result upload, request worker, summaries
+│   ├── medical/              Medical scope rules and tender categories
+│   ├── extraction/           Advert OCR (Windows OCR or Gemini) and PDF text extraction
+│   ├── ai/                   Gemini/OpenAI clients and the PDF brief agent
+│   ├── core/                 Settings, data models, SQLite, background jobs
+│   ├── templates/, static/   HTML, CSS and JavaScript
 ├── tests/                    pytest suite, including medical false-negative tests
-├── docs/                     Architecture, AI engine, medical rules, operations, deployment
-├── scripts/windows/          Local runners and Windows scheduled-task installers
-├── .github/                  CI workflow, Dependabot, issue and pull request templates
-├── .vscode/                  Shared editor settings, debug configs and tasks
-├── .env.example              All supported settings (copy to .env)
-├── pyproject.toml            Dependencies and tool configuration
-└── vercel.json               Vercel function settings
+├── docs/                     Architecture, operations, deployment, medical and AI rules
+├── scripts/windows/          setup, runners and scheduled-task installers
+├── setup.cmd, start.cmd      One-step setup and start on Windows
+├── .env.example              Every setting, with defaults (copy to .env)
+└── pyproject.toml            Dependencies and tool settings
 ```
 
-Local-only folders `data/`, `reports/` and `.venv/` are created at runtime and
-are never committed.
+`.venv\`, `data\`, `reports\` and `.env` stay on the PC and are never
+committed.
 
-## What the MVP does
+## Development
 
-1. An editor manually downloads a newspaper using their valid subscription.
-2. The editor uploads that PDF to the local admin interface.
-3. The app extracts text page by page without sending the original PDF onward.
-4. The AI applies high-recall medical-scope rules, retains uncertain medical
-   candidates for human review, and ignores demonstrably unrelated news.
-5. Duplicate stories are merged and every summary keeps its source page number.
-6. An editor checks and approves every story.
-7. Only an approved issue can be published at a read-only public URL.
-8. By default, the uploaded PDF is deleted when processing finishes.
-
-## Quick start on Windows PowerShell
-
-```powershell
-cd D:\Automation
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-Copy-Item .env.example .env
+```bat
+setup.cmd -Dev
+.venv\Scripts\python.exe -m pytest -q
+.venv\Scripts\python.exe -m ruff check .
 ```
 
-Edit `.env` and add your `GEMINI_API_KEY`. Keep `AI_PROVIDER=gemini`. Also replace
-`ADMIN_PASSWORD` before making the app reachable by anyone else.
+GitHub Actions runs the same lint and tests on every push. The tests never
+call Gemini, OpenAI or the publisher. VS Code settings, debug configurations
+and tasks are in `.vscode/`.
 
-Start the application:
+## Limits
 
-```powershell
-uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-Open <http://127.0.0.1:8000/admin>. If authentication is enabled, use username
-`admin` and the password from `.env`.
-
-## Daily operation
-
-1. Download the edition manually from the publisher.
-2. Open `/admin` and enter the publication name, edition date, and optional
-   official source URL.
-3. Upload the PDF. The page will show `Processing`; refresh it periodically.
-4. Review every generated headline and summary against the cited PDF page.
-5. Edit inaccurate wording and approve the story.
-6. Use **Approve all visible stories** only after reviewing them.
-7. Click **Publish brief**. The public URL appears on the issue page.
-
-The public page contains summaries and attribution only. It never serves the
-source PDF or extracted article text.
-
-## Important limitations
-
-- Text extraction works best with text-based PDFs. Image-only scans require an
-  OCR stage, which is intentionally not hidden inside this MVP.
-- Newspaper columns can be extracted in an imperfect reading order. This is why
-  the approval gate is mandatory.
-- An AI summary can still be factually wrong even when it follows the JSON
-  schema. Always compare sensitive stories with the source.
-- A personal newspaper subscription does not itself establish republication
-  rights. Obtain written permission/licensing before operating a public or
-  commercial service.
+- **Gemini free tier:** 5 requests a minute and 500 a day per model. A month
+  of checks in one day uses it up; affected results are marked incomplete and
+  should be re-checked the next day, or use a paid plan.
+- **Vercel Blob free tier:** limited monthly uploads. Going over suspends the
+  store, and the online site cannot load results until the monthly reset.
+- OCR and AI can misread names, dates and amounts. Always check against the
+  image or the e-paper before acting.
+- A newspaper subscription does not grant redistribution rights. Keep
+  clippings for internal use.
 
 ## Documentation
 
-- [Architecture and data flow](docs/ARCHITECTURE.md)
-- [Setup and operations](docs/OPERATIONS.md)
-- [Publishing and safety checklist](docs/PUBLISHING_CHECKLIST.md)
-- [Medical-only selection rules](docs/MEDICAL_RULES.md)
-- [Gemini and AI-engine configuration](docs/AI_ENGINE.md)
-
-## Tests
-
-```powershell
-pytest
-ruff check .
-```
-
-The tests mock provider calls and do not contact Gemini or OpenAI.
-
-## Daily News screenshot report
-
-The local monitor checks the English *Daily News* edition, selects articles
-with Gemini AI plus local high-recall medical safety rules, and saves the
-publisher's original cropped article images. Local rules retain possible items
-that Gemini rejects, but clearly mark them for human review. If AI matching is
-incomplete, generation fails closed and preserves the previous complete report
-instead of silently publishing a partial local-only result. It does not
-summarize articles.
-
-Run it manually:
-
-```powershell
-.\scripts\windows\run_epaper_monitor.ps1 -OpenReport
-```
-
-Install or refresh the Windows schedule (daily at 8:00 PM local time):
-
-```powershell
-.\scripts\windows\install_daily_schedule.ps1
-```
-
-Reports are written to `reports\YYYY-MM-DD\index.html`; `reports\latest.html`
-always contains the latest report. Logs are written to
-`data\epaper-monitor.log`. The scheduled task runs only while the Windows user
-is logged on and opens the finished report in the default browser.
-
-The report is for the subscriber's private use. Do not redistribute the saved
-article images without the publisher's permission.
-
-## Manual web checker
-
-Start the local web application and open <http://127.0.0.1:8000/>. The home
-page lets you select **Daily News** or **Sunday Observer**, optionally choose an
-edition date, and click **Check now**. If the date is blank, it searches
-backward for that publication's latest available edition; if a date is selected,
-it checks that exact edition. Matching original article images appear directly
-in the web page. This manual option does not replace the 8:00 PM Daily News
-schedule.
-
-Install the local site to start automatically after Windows sign-in:
-
-```powershell
-.\scripts\windows\install_web_app_startup.ps1
-```
-
-Use `Open News Hunter.url` in this folder to open the checker.
+- [Architecture](docs/ARCHITECTURE.md) · [Operations](docs/OPERATIONS.md) ·
+  [Deployment](docs/DEPLOYMENT.md)
+- [Medical selection rules](docs/MEDICAL_RULES.md) · [AI engine](docs/AI_ENGINE.md) ·
+  [Publishing checklist](docs/PUBLISHING_CHECKLIST.md)
+- The older PDF brief workflow (upload a PDF at `/admin`) is described in
+  [docs/OPERATIONS.md](docs/OPERATIONS.md).
