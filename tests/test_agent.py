@@ -21,16 +21,26 @@ def story(title: str, page: int, confidence: float = 0.8) -> ExtractedStory:
     )
 
 
-def test_deduplicate_merges_similar_titles_and_pages():
+def test_deduplicate_merges_normalized_exact_titles_and_pages():
     result = deduplicate_stories(
         [
-            story("Council approves new transport plan", 1),
-            story("Council approves the new transport plan", 3, confidence=0.9),
+            story("Hospital opens a new clinic", 1),
+            story("HOSPITAL OPENS A NEW CLINIC!", 3, confidence=0.9),
         ]
     )
     assert len(result) == 1
     assert result[0].page_numbers == [1, 3]
     assert result[0].confidence == 0.9
+
+
+def test_similar_but_distinct_medical_headlines_are_not_merged():
+    result = deduplicate_stories(
+        [
+            story("Hospital opens a new clinic", 1),
+            story("Hospital opens a new cancer clinic", 1),
+        ]
+    )
+    assert len(result) == 2
 
 
 def test_deduplicate_keeps_unrelated_stories():

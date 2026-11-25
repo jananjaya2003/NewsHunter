@@ -19,7 +19,7 @@ Copy `.env.example` to `.env` and configure:
 | `GEMINI_FALLBACK_MODELS` | Comma-separated transient-failure/model fallback order |
 | `OPENAI_API_KEY` | Optional fallback credential |
 | `OPENAI_MODEL` | Optional fallback model |
-| `ADMIN_PASSWORD` | HTTP Basic password for editor routes |
+| `ADMIN_PASSWORD` | HTTP Basic password for editor routes; required for editor and check actions on Vercel |
 | `KEEP_SOURCE_PDF` | Retain or delete source files after processing |
 | `MAX_UPLOAD_MB` | Hard upload size limit |
 | `MAX_CHUNK_CHARS` | Approximate maximum text sent per extraction call |
@@ -35,8 +35,10 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 The default host is deliberately local-only. Do not change it to `0.0.0.0`
 without authentication, TLS, a firewall, and an explicit deployment review.
-Set a strong, unique `ADMIN_PASSWORD` even for local use. Unsafe authenticated
-requests are rejected unless their browser Origin or Referer matches the app.
+Set a strong, unique `ADMIN_PASSWORD` even for local use. On Vercel, read-only
+pages remain available without it, but editor pages and check actions are
+disabled until it is configured. Unsafe authenticated requests are rejected
+unless their browser Origin or Referer matches the app.
 
 ## Processing behavior
 

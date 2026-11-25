@@ -47,7 +47,7 @@ def test_vercel_default_paths_are_in_temporary_storage():
     assert result.returncode == 0, result.stderr
 
 
-def test_vercel_without_password_opens_site_without_login():
+def test_vercel_without_password_keeps_read_only_pages_but_blocks_actions():
     env = {**os.environ, "VERCEL": "1", "ADMIN_PASSWORD": ""}
     for name in ("DATABASE_PATH", "UPLOAD_DIR", "REPORT_DIR"):
         env[name] = str(Path(tempfile.mkdtemp()) / name.lower())
@@ -57,7 +57,10 @@ def test_vercel_without_password_opens_site_without_login():
             "from app.main import app; from fastapi.testclient import TestClient; "
             "c=TestClient(app); "
             "assert c.get('/health').status_code == 200; "
-            "assert c.get('/monitor').status_code == 200"
+            "assert c.get('/monitor').status_code == 200; "
+            "assert c.get('/admin').status_code == 503; "
+            "assert c.post('/monitor/check', data={'publication':'daily-news'}).status_code == 503; "
+            "assert c.post('/api/check', data={'publication':'daily-news'}).status_code == 503"
         )], env=env, capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr

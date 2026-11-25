@@ -79,6 +79,15 @@
     <label>Summary
       <textarea name="summary" rows="5" maxlength="2000" required>{{ story.summary }}</textarea>
     </label>
+    <div class="evidence-block">
+      <span class="field-label">Source-grounded medical evidence</span>
+      {% if story.medical_evidence %}
+      <blockquote>{{ story.medical_evidence }}</blockquote>
+      {% else %}
+      <p class="warning">Evidence was not retained for this older record. Verify medical relevance directly against the cited page.</p>
+      {% endif %}
+      {% if story.medical_relevance %}<p class="details"><strong>Why included:</strong> {{ story.medical_relevance }}</p>{% endif %}
+    </div>
     {% if story.key_people %}<p class="details"><strong>People:</strong> {{ story.key_people | join(', ') }}</p>{% endif %}
     {% if story.key_numbers %}<p class="details"><strong>Numbers:</strong> {{ story.key_numbers | join(', ') }}</p>{% endif %}
     <div class="card-actions">

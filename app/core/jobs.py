@@ -8,7 +8,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 
 LOGGER = logging.getLogger(__name__)
 
@@ -51,26 +51,34 @@ class JobManager:
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
-            return self._jobs.get(job_id)
+            job = self._jobs.get(job_id)
+            return replace(job) if job else None
 
     def submit(self, publication: str, requested_date: str, runner: Runner) -> Job:
         """Start a check, or return the running one for the same edition."""
         key = (publication, requested_date)
         with self._lock:
             active_id = self._active.get(key)
-            if active_id and self._jobs[active_id].status in {"queued", "running"}:
-                return self._jobs[active_id]
+            active_job = self._jobs.get(active_id) if active_id else None
+            if active_job and active_job.status in {"queued", "running"}:
+                return replace(active_job)
+            if active_id:
+                self._active.pop(key, None)
             job = Job(id=secrets.token_urlsafe(9), publication=publication, requested_date=requested_date)
             self._jobs[job.id] = job
             self._active[key] = job.id
             self._trim()
+            snapshot = replace(job)
         self._pool.submit(self._run, job, runner)
-        return job
+        return snapshot
 
     def _trim(self) -> None:
         finished = [job for job in self._jobs.values() if job.status in {"done", "failed"}]
         for job in sorted(finished, key=lambda item: item.started_at)[: max(0, len(finished) - self._keep)]:
             self._jobs.pop(job.id, None)
+            key = (job.publication, job.requested_date)
+            if self._active.get(key) == job.id:
+                self._active.pop(key, None)
 
     def _run(self, job: Job, runner: Runner) -> None:
         def progress(stage: str, done: int, total: int, message: str) -> None:

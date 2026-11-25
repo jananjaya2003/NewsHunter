@@ -282,6 +282,9 @@ th { font-size: .75rem; letter-spacing: .05em; text-transform: uppercase; }
 .story-meta .warning { background: var(--red); color: white; }
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
 .details { margin: .45rem 0; }
+.evidence-block { margin-top: .8rem; padding: .75rem; border-left: 3px solid var(--green); background: var(--green-soft); }
+.evidence-block blockquote { margin: .5rem 0; font-weight: 700; }
+.evidence-block .warning { display: block; width: fit-content; padding: .4rem .6rem; border-radius: 4px; }
 .card-actions { justify-content: space-between; margin-top: 1rem; }
 .check { display: flex; grid-template-columns: auto 1fr; align-items: center; }
 .check input { width: auto; min-height: auto; }

@@ -357,7 +357,21 @@ async def protect_admin(request: Request, call_next):
         or request.url.path.startswith("/static/")
         or request.url.path == "/health"
     )
-    if public_path or not settings.admin_password:
+    if public_path:
+        return await call_next(request)
+
+    if not settings.admin_password:
+        protected_action = request.url.path.startswith("/admin/") or request.url.path in {
+            "/admin",
+            "/monitor/check",
+            "/api/check",
+        }
+        if IS_VERCEL and protected_action:
+            return Response(
+                "This action is disabled until ADMIN_PASSWORD is configured for this deployment.",
+                status_code=503,
+                media_type="text/plain",
+            )
         return await call_next(request)
 
     authorization = request.headers.get("Authorization", "")

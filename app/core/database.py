@@ -36,6 +36,8 @@ CREATE TABLE IF NOT EXISTS stories (
     key_people TEXT NOT NULL DEFAULT '[]',
     key_numbers TEXT NOT NULL DEFAULT '[]',
     page_numbers TEXT NOT NULL DEFAULT '[]',
+    medical_evidence TEXT NOT NULL DEFAULT '',
+    medical_relevance TEXT NOT NULL DEFAULT '',
     confidence REAL NOT NULL,
     sensitive INTEGER NOT NULL DEFAULT 0,
     needs_review INTEGER NOT NULL DEFAULT 1,
@@ -46,6 +48,7 @@ CREATE TABLE IF NOT EXISTS stories (
 
 CREATE INDEX IF NOT EXISTS idx_stories_issue ON stories(issue_id);
 """
+SCHEMA_VERSION = 2
 
 
 def _now() -> str:
@@ -61,7 +64,6 @@ class Database:
         connection = sqlite3.connect(self.path, timeout=30)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA journal_mode = WAL")
         try:
             yield connection
             connection.commit()
@@ -70,7 +72,29 @@ class Database:
 
     def initialize(self) -> None:
         with self.connect() as connection:
+            # Journal mode is persistent. Set it during initialization instead
+            # of making every short-lived connection contend for this pragma.
+            connection.execute("PRAGMA journal_mode = WAL")
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version > SCHEMA_VERSION:
+                raise RuntimeError(
+                    f"Database schema version {version} is newer than supported "
+                    f"version {SCHEMA_VERSION}. Update News Hunter before opening this database."
+                )
             connection.executescript(SCHEMA)
+            story_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(stories)").fetchall()
+            }
+            # Existing installations keep their records; new review provenance
+            # columns are added with safe empty defaults.
+            migrations = {
+                "medical_evidence": "TEXT NOT NULL DEFAULT ''",
+                "medical_relevance": "TEXT NOT NULL DEFAULT ''",
+            }
+            for column, definition in migrations.items():
+                if column not in story_columns:
+                    connection.execute(f"ALTER TABLE stories ADD COLUMN {column} {definition}")
+            connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def create_issue(
         self,
@@ -199,9 +223,10 @@ class Database:
                     """
                     INSERT INTO stories
                         (issue_id, title, byline, category, summary, key_people,
-                         key_numbers, page_numbers, confidence, sensitive,
+                         key_numbers, page_numbers, medical_evidence, medical_relevance,
+                         confidence, sensitive,
                          needs_review, approved, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
                     """,
                     (
                         issue_id,
@@ -212,6 +237,8 @@ class Database:
                         json.dumps(story["key_people"], ensure_ascii=False),
                         json.dumps(story["key_numbers"], ensure_ascii=False),
                         json.dumps(story["page_numbers"]),
+                        story.get("medical_evidence", ""),
+                        story.get("medical_relevance", ""),
                         story["confidence"],
                         int(story["sensitive"]),
                         now,

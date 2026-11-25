@@ -64,7 +64,15 @@ with pages that actually exist in the input chunk.
 
 An `issue` stores metadata, processing state, an overview, editor notes, and a
 cryptographic file hash. A `story` stores an original AI summary, category,
-byline, source pages, confidence, sensitivity flag, and approval state.
+byline, source pages, the exact medical-evidence phrase, the model's medical
+relevance explanation, confidence, sensitivity flag, and approval state. Evidence
+and relevance are shown to editors beside the cited pages. Existing databases
+are migrated in place with empty evidence fields for older records; those records
+are visibly flagged for direct source review.
+
+Story deduplication only merges identical normalized headlines. Similar titles
+remain separate draft candidates because a false merge can hide a distinct
+medical item; editors can resolve duplicates during review.
 
 States are:
 

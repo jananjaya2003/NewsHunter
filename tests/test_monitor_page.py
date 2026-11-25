@@ -10,6 +10,7 @@ import requests
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.core.database import Database
 from app.main import app
 from app.monitor.epaper_monitor import COLOMBO
 
@@ -222,6 +223,38 @@ def test_security_headers_are_present():
         .split("script-src", 1)[1]
         .split(";", 1)[0]
     )
+
+
+def test_editor_shows_source_medical_evidence_and_relevance(monkeypatch, tmp_path):
+    database = Database(tmp_path / "editor.db")
+    database.initialize()
+    issue_id = database.create_issue("Daily News", "2026-10-05", "", "paper.pdf", "editor-hash")
+    database.replace_generated_content(
+        issue_id,
+        [{
+            "title": "Hospital expands patient services",
+            "byline": "",
+            "category": "Healthcare Services",
+            "summary": "The hospital will expand patient services.",
+            "key_people": [],
+            "key_numbers": [],
+            "page_numbers": [3],
+            "medical_evidence": "hospital patient services",
+            "medical_relevance": "The item reports a change to hospital services.",
+            "confidence": 0.9,
+            "sensitive": False,
+        }],
+        "Overview.",
+        [],
+        [],
+    )
+    monkeypatch.setattr(main_module, "database", database)
+
+    response = client.get(f"/admin/issues/{issue_id}")
+
+    assert response.status_code == 200
+    assert "hospital patient services" in response.text
+    assert "The item reports a change to hospital services." in response.text
 
 
 def test_authenticated_cross_site_post_is_blocked(monkeypatch):

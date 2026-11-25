@@ -5,7 +5,6 @@ import re
 import time
 from collections import defaultdict
 from collections.abc import Iterable
-from difflib import SequenceMatcher
 from pathlib import Path
 
 from app.ai.engines import AIEngine, create_ai_engine
@@ -74,9 +73,10 @@ def _normalise_title(value: str) -> str:
 def _same_story(left: ExtractedStory, right: ExtractedStory) -> bool:
     a = _normalise_title(left.title)
     b = _normalise_title(right.title)
-    if not a or not b:
-        return False
-    return a == b or SequenceMatcher(None, a, b).ratio() >= 0.86
+    # Approximate title matching can merge distinct articles with similar
+    # headlines. Keep both candidates for editorial review unless their
+    # normalized titles are identical.
+    return bool(a and b and a == b)
 
 
 def deduplicate_stories(stories: Iterable[ExtractedStory]) -> list[ExtractedStory]:
@@ -96,6 +96,8 @@ def deduplicate_stories(stories: Iterable[ExtractedStory]) -> list[ExtractedStor
             existing.summary = candidate.summary
             existing.byline = candidate.byline or existing.byline
             existing.category = candidate.category
+            existing.medical_evidence = candidate.medical_evidence or existing.medical_evidence
+            existing.medical_relevance = candidate.medical_relevance or existing.medical_relevance
     return merged
 
 
