@@ -103,26 +103,36 @@ PC runs with `python -m app.monitor.request_worker`. See
 
 ```text
 NewsHunter/
-├── app/
-│   ├── main.py               Web app: pages, API, image labels, online-check flow
-│   ├── monitor/              E-paper checker, sections, result upload, request worker, summaries
-│   ├── medical/              Medical scope rules and tender categories
-│   ├── extraction/           Advert OCR (Windows OCR or Gemini) and PDF text extraction
-│   ├── ai/                   Gemini/OpenAI clients and the PDF brief agent
-│   ├── core/                 Settings, data models, SQLite, background jobs
-│   ├── templates/, static/   HTML, CSS and JavaScript
-├── tests/                    pytest suite, including medical false-negative tests
-├── docs/                     Architecture, operations, deployment, medical and AI rules
-├── scripts/windows/          setup, runners and scheduled-task installers
-├── setup.cmd, start.cmd      One-step setup and start on Windows
-├── .env.example              Every setting, with defaults (copy to .env)
-└── pyproject.toml            Dependencies and tool settings
+├── app/                      Application package, templates and static assets
+│   ├── main.py               FastAPI routes and application startup
+│   ├── ai/                   Provider clients, prompts and structured extraction
+│   ├── core/                 Configuration, SQLite repository, schemas and jobs
+│   ├── extraction/           PDF text extraction and advertisement OCR
+│   ├── medical/              Medical scope rules and opportunity categories
+│   ├── monitor/              E-paper checks, result storage and summaries
+│   ├── templates/            Jinja HTML pages
+│   └── static/               Browser JavaScript, styles and icons
+├── docs/                     Architecture, operations, safety and deployment guides
+├── scripts/windows/          Windows setup, startup and scheduled-task scripts
+├── tests/                    Offline unit and integration regression tests
+├── .github/                  CI workflow and contribution templates
+├── AGENTS.md                 Repository-specific engineering and medical safeguards
+├── CONTRIBUTING.md           Development workflow and change requirements
+├── SECURITY.md               Operational security guidance
+├── .env.example              Configuration template; no real credentials
+├── pyproject.toml            Package metadata, dependencies and tool settings
+├── run.py                    Cross-platform setup and local application runner
+├── setup.cmd, start.cmd      Windows setup and start commands
+└── vercel.json               Vercel deployment configuration
 ```
 
 `.venv\`, `data\`, `reports\` and `.env` stay on the PC and are never
 committed.
 
 ## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development requirements and review
+guidance.
 
 ```bat
 .\setup.cmd -Dev
@@ -148,9 +158,5 @@ and tasks are in `.vscode/`.
 
 ## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) · [Operations](docs/OPERATIONS.md) ·
-  [Deployment](docs/DEPLOYMENT.md)
-- [Medical selection rules](docs/MEDICAL_RULES.md) · [AI engine](docs/AI_ENGINE.md) ·
-  [Publishing checklist](docs/PUBLISHING_CHECKLIST.md)
-- The older PDF brief workflow (upload a PDF at `/admin`) is described in
-  [docs/OPERATIONS.md](docs/OPERATIONS.md).
+Start at the [documentation index](docs/README.md). It links to the architecture,
+operations, deployment, AI, medical-safety, and publishing guides.

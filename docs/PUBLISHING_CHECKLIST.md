@@ -26,7 +26,8 @@ An editor should complete this list for every edition.
 - [ ] Court, election, health, finance, crime, and emergency stories received
       extra review.
 - [ ] Opinion/editorial content is identified rather than presented as news.
-- [ ] Uncertain or OCR-damaged content was removed or corrected.
+- [ ] Uncertain or OCR-damaged candidates were retained for human review, or any
+      exclusion has a source-grounded reason and a visible review note.
 
 ## Publication
 
