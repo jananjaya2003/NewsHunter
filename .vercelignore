@@ -13,3 +13,4 @@ tests/
 docs/
 *.ps1
 !app/extraction/ocr_windows.ps1
+run.py

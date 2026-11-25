@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections import defaultdict
 from collections.abc import Iterable
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -98,6 +99,20 @@ def deduplicate_stories(stories: Iterable[ExtractedStory]) -> list[ExtractedStor
     return merged
 
 
+def _page_texts(chunk: TextChunk) -> dict[int, str]:
+    """Return source text grouped by its explicit page markers.
+
+    Long pages can have multiple chunks carrying the same marker, so their
+    segments are joined before evidence is checked.
+    """
+    markers = list(re.finditer(r"(?m)^--- PAGE (\d+) ---\s*$", chunk.text))
+    pages: dict[int, list[str]] = defaultdict(list)
+    for index, marker in enumerate(markers):
+        end = markers[index + 1].start() if index + 1 < len(markers) else len(chunk.text)
+        pages[int(marker.group(1))].append(chunk.text[marker.end() : end].strip())
+    return {number: "\n".join(parts) for number, parts in pages.items()}
+
+
 class NewspaperAgent:
     def __init__(
         self,
@@ -126,21 +141,24 @@ class NewspaperAgent:
             )
 
         allowed_pages = set(chunk.page_numbers)
+        page_text = _page_texts(chunk)
         valid_stories: list[ExtractedStory] = []
         for story in result.stories:
             story.page_numbers = sorted(set(story.page_numbers) & allowed_pages)
             story.title = " ".join(story.title.split())[:300]
             story.summary = " ".join(story.summary.split())[:2000]
+            cited_text = "\n".join(page_text.get(number, "") for number in story.page_numbers)
             if (
                 story.title
                 and story.summary
                 and story.page_numbers
-                and medical_evidence_supported(story.medical_evidence, chunk.text)
+                and medical_evidence_supported(story.medical_evidence, cited_text)
             ):
                 valid_stories.append(story)
             else:
                 result.extraction_warnings.append(
-                    f"Medical candidate requires manual review because validation failed: "
+                    f"Medical candidate requires manual review because its cited page, source "
+                    f"evidence, or required fields could not be validated: "
                     f"{story.title or '[untitled candidate]'}"
                 )
         result.stories = valid_stories

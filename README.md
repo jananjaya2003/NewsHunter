@@ -28,6 +28,15 @@ Open **Command Prompt** or **PowerShell** in the project folder and run:
 (Type the `.\` too: some company PCs block running files from the current
 folder without it.)
 
+Or do both in one command, on Windows, macOS or Linux:
+
+```bat
+python run.py
+```
+
+It sets everything up the first time (and again whenever the dependencies
+change), then starts the app. Options: `--port 8001`, `--no-browser`.
+
 - `setup.cmd` checks Python, creates `.venv`, installs everything, creates
   `.env` and checks that the app loads. It is safe to run again; use
   `.\setup.cmd -Test` to also run the test suite.
