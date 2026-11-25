@@ -16,6 +16,7 @@ from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, Request, Uplo
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from vercel.headers import HeadersContext, headers_from_asgi_scope
 
 from app.ai.agent import NewspaperAgent
 from app.core.config import IS_VERCEL, settings
@@ -394,14 +395,28 @@ async def add_security_headers(request: Request, call_next):
     return response
 
 
-@app.middleware("http")
-async def vercel_request_context(request: Request, call_next):
-    # Vercel Blob authenticates with the OIDC token sent in this request's headers.
-    if IS_VERCEL:
-        from vercel.headers import set_headers
+class VercelHeadersContextMiddleware:
+    """Expose each request's Vercel headers to SDKs using ContextVars.
 
-        set_headers(dict(request.headers))
-    return await call_next(request)
+    Pure ASGI middleware keeps the context active across async endpoints and
+    FastAPI's sync-handler threadpool, then restores it when the request ends.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if not IS_VERCEL or scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = headers_from_asgi_scope(scope)
+        with HeadersContext(headers).use():
+            await self.app(scope, receive, send)
+
+
+# Registered after the @app.middleware handlers so this context wraps them too.
+app.add_middleware(VercelHeadersContextMiddleware)
 
 
 @app.get("/", include_in_schema=False)
